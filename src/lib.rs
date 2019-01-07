@@ -47,7 +47,9 @@ impl NcbiTaxonomy {
     /// # Examples
     ///
     /// ```
-    /// let taxonomy = NcbiTaxonomy::from_ncbi_files("data/nodes.dmp", "data/names.dmp")
+    /// use ncbitaxonomy::*;
+    ///
+    /// let taxonomy = NcbiTaxonomy::from_ncbi_files("data/nodes.dmp", "data/names.dmp");
     /// ```
     pub fn from_ncbi_files(nodes_filename: &str, names_filename: &str) -> Result<NcbiTaxonomy> {
         let mut child_ids_by_parent_id: HashMap<u32, Vec<u32>> = HashMap::new();
