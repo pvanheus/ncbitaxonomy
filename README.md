@@ -1,3 +1,5 @@
+[![CircleCI](https://circleci.com/gh/pvanheus/ncbitaxonomy.svg?style=svg)](https://circleci.com/gh/pvanheus/ncbitaxonomy)
+
 ### ncbitaxonomy
 
 This is a Rust crate (i.e. library) for working with a local copy of the 
@@ -41,5 +43,4 @@ ARGS:
 ### TODO
 
 * Clean up non-idiomatic code (e.g. the use of the insert_new_entry bool)
-* Add testing via CI
 * Refactor taxonomy_filter_refseq: move most code to library, add tests
