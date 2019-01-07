@@ -1,0 +1,9 @@
+[package]
+name = "ncbitaxonomy"
+description = ""
+version = "0.1.0"
+authors = ["Peter van Heusden <pvh@sanbi.ac.za>"]
+
+[dependencies]
+indextree = "3.0.0"
+error-chain = "0.11.0"
