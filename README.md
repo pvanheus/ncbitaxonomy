@@ -15,14 +15,26 @@ A tool to filter a NCBI RefSeq FASTA file so that only the ancestors of a given 
 are retained.
 
 ```bash
-$ taxonomy_filter_refseq
-error: The following required arguments were not provided:
-    <INPUT_FASTA>
-    <TAXONOMY_DIR>
-    <ANCESTOR_NAME>
+$ taxonomy_filter_refseq --help
+taxonomy_filter_refseq 0.1.2
+Peter van Heusden <pvh@sanbi.axc.za>
+Filter NCBI RefSeq FASTA files by taxonomic lineage
 
 USAGE:
     taxonomy_filter_refseq [OPTIONS] <INPUT_FASTA> <TAXONOMY_DIR> <ANCESTOR_NAME> [OUTPUT_FASTA]
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+    -t, --tax_prefix <TAXONOMY_FILENAME_PREFIX>    String to prepend to names of nodes.dmp and names.dmp
+
+ARGS:
+    <INPUT_FASTA>      FASTA file with RefSeq sequences
+    <TAXONOMY_DIR>     Directory containing the NCBI taxonomy nodes.dmp and names.dmp files
+    <ANCESTOR_NAME>    Name of ancestor to use as ancestor filter
+    <OUTPUT_FASTA>     Output FASTA filename (or stdout if omitted)
 
 ```
 

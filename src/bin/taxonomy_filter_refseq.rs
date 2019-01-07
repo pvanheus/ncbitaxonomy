@@ -33,8 +33,8 @@ fn wrap(seq: TextSlice, width: usize) -> Vec<u8> {
 }
 
 pub fn main() {
-    let matches = clap_app!(myapp =>
-        (version: "0.1.0")
+    let matches = clap_app!(taxonomy_filter_refseq =>
+        (version: "0.1.2")
         (author: "Peter van Heusden <pvh@sanbi.axc.za>")
         (about: "Filter NCBI RefSeq FASTA files by taxonomic lineage")
         (@arg TAXONOMY_FILENAME_PREFIX: -t --tax_prefix +takes_value "String to prepend to names of nodes.dmp and names.dmp")
