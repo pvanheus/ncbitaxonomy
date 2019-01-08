@@ -7,7 +7,7 @@ This is a Rust crate (i.e. library) for working with a local copy of the
 The database can be downloaded (either `taxdump.zip` or `taxdump.tar.gz`) from the
 [NCBI Taxonomy FTP site](https://ftp.ncbi.nih.gov/pub/taxonomy/).
 
-Documentation for version 0.1.0 is available at [crates.io](https://docs.rs/ncbitaxonomy/0.1.0/ncbitaxonomy/struct.NcbiTaxonomy.html).
+Documentation for version 0.1.3 is available at [crates.io](https://docs.rs/ncbitaxonomy/0.1.3/ncbitaxonomy/struct.NcbiTaxonomy.html).
 
 ### taxonomy_filter_refseq
 
@@ -42,5 +42,4 @@ ARGS:
 
 ### TODO
 
-* Clean up non-idiomatic code (e.g. the use of the insert_new_entry bool)
 * Refactor taxonomy_filter_refseq: move most code to library, add tests
