@@ -45,7 +45,7 @@ pub fn main() {
         ).get_matches();
 
     let input_fasta_filename = matches.value_of("INPUT_FASTA").unwrap();
-    let input_fasta = File::open(input_fasta_filename).expect(format!("Failed to open input FASTA file ({})", input_fasta_filename).as_str());
+    let input_fasta = File::open(input_fasta_filename).unwrap_or_else(|_| panic!("Failed to open input FASTA file ({})", input_fasta_filename));
     let input_fasta_reader = fasta::Reader::new(input_fasta);
 
     let ncbi_taxonomy_path = Path::new(matches.value_of("TAXONOMY_DIR").unwrap());
@@ -71,7 +71,7 @@ pub fn main() {
     // https://stackoverflow.com/questions/26378842/how-do-i-overcome-match-arms-with-incompatible-types-for-structs-implementing-sa
     // in short, it is means to present each match 'arm' as returning the same (Box<io::Write>) type
     let output_file = match matches.value_of("OUTPUT_FILE") {
-        Some(name) => Box::new(File::create(name).expect(format!("Failed to open output file ({})", name).as_str())) as Box<io::Write>,
+        Some(name) => Box::new(File::create(name).unwrap_or_else(|_| panic!("Failed to open output file ({})", name))) as Box<io::Write>,
         None => Box::new(io::stdout()) as Box<io::Write>,
     };
 
@@ -94,8 +94,8 @@ pub fn main() {
             Some(desc) => desc,
             None => "unknown"
         };
-        let species_start = description.find('[').expect(format!("[ missing in description ({})", description).as_str());
-        let species_end = description.rfind(']').expect(format!("] missing in description ({})", description).as_str());
+        let species_start = description.find('[').unwrap_or_else(|| panic!("[ missing in description ({})", description));
+        let species_end = description.rfind(']').unwrap_or_else(|| panic!("] missing in description ({})", description));
         let species_name = &description[(species_start+1)..species_end];
         if taxonomy.contains_name(species_name) && taxonomy.is_descendant(species_name, ancestor_name) {
             output_fasta.write(record.id(), record.desc(), wrap(record.seq(), 80).as_slice()).unwrap();

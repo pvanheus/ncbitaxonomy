@@ -65,7 +65,7 @@ impl NcbiTaxonomy {
                     if parent_id != id {  // this happens for the root node
                         // thanks to https://stackoverflow.com/questions/33243784/append-to-vector-as-value-of-hashmap/33243862
                         // for this way to get the existing entry or insert an empty list.
-                        child_ids_by_parent_id.entry(parent_id).or_insert(Vec::new()).push(id);
+                        child_ids_by_parent_id.entry(parent_id).or_insert_with(Vec::new).push(id);
                     }
                 },
                 Err(e) => return Err(ErrorKind::Io(e).into())
@@ -116,7 +116,7 @@ impl NcbiTaxonomy {
         }
 
         let tree = NcbiTaxonomy { arena, name_to_node, id_to_node, id_to_name };
-        return Ok(tree);
+        Ok(tree)
     }
 
     /// contains_id
@@ -148,12 +148,12 @@ impl NcbiTaxonomy {
             Some(id) => id,
             None => return false
         };
-        for node in id.ancestors(&self.arena).into_iter() {
+        for node in id.ancestors(&self.arena) {
             if node == *ancestor_id {
                 return true
             }
         }
-        return false
+        false
     }
 
     /// get_node_by_id
