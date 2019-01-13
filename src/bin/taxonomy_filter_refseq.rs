@@ -70,7 +70,7 @@ pub fn main() {
     // the use of Box here is inspired by:
     // https://stackoverflow.com/questions/26378842/how-do-i-overcome-match-arms-with-incompatible-types-for-structs-implementing-sa
     // in short, it is means to present each match 'arm' as returning the same (Box<io::Write>) type
-    let output_file = match matches.value_of("OUTPUT_FILE") {
+    let output_file = match matches.value_of("OUTPUT_FASTA") {
         Some(name) => Box::new(File::create(name).unwrap_or_else(|_| panic!("Failed to open output file ({})", name))) as Box<io::Write>,
         None => Box::new(io::stdout()) as Box<io::Write>,
     };
