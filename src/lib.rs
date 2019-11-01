@@ -104,7 +104,7 @@ impl NcbiTaxonomy {
                 Ok(line) => line,
                 Err(e) => return Err(ErrorKind::Io(e).into())
             };
-            let mut fields = line.split("\t|\t").collect::<Vec<&str>>();
+            let fields = line.split("\t|\t").collect::<Vec<&str>>();
             if fields[3].starts_with("scientific name") {
                 let id_str = fields[0];
                 let id = id_str.parse::<u32>().chain_err(|| format!("failed to parse id_str as u32: {}", id_str))?;
