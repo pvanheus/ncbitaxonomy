@@ -40,6 +40,34 @@ ARGS:
 
 ```
 
-### TODO
+### taxonomy_filter_fastq
 
-* Refactor taxonomy_filter_refseq: move most code to library, add tests
+(new in version 0.2.0)
+
+```bash
+$ taxonomy_filter_fastq --help
+taxonomy_filter_refseq 0.1.2
+Peter van Heusden <pvh@sanbi.axc.za>
+Filter NCBI RefSeq FASTA files by taxonomic lineage
+
+USAGE:
+    taxonomy_filter_fastq [FLAGS] [OPTIONS] <INPUT_FASTQ> --ancestor_taxid <ANCESTOR_ID> --taxdir <TAXONOMY_DIR> --tax_report_filename <TAXONOMY_REPORT_FILENAME> <--centrifuge|--kraken2>
+
+FLAGS:
+    -d, --output_dir    Directory to deposited filtered output files in
+    -C, --centrifuge    Filter using report from Centrifuge
+    -h, --help          Prints help information
+    -K, --kraken2       Filter using report from Kraken2
+    -V, --version       Prints version information
+
+OPTIONS:
+    -A, --ancestor_taxid <ANCESTOR_ID>                      Name of ancestor to use as ancestor filter
+    -T, --taxdir <TAXONOMY_DIR>
+            Directory containing the NCBI taxonomy nodes.dmp and names.dmp files
+
+    -t, --tax_prefix <TAXONOMY_FILENAME_PREFIX>             String to prepend to names of nodes.dmp and names.dmp
+    -F, --tax_report_filename <TAXONOMY_REPORT_FILENAME>    Output from Kraken2 (default) or Centrifuge
+
+ARGS:
+    <INPUT_FASTQ>    FASTA file with RefSeq sequences
+```
