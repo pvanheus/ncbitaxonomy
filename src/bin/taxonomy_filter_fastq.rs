@@ -75,7 +75,7 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
     println!("filter tool {}", filter_tool);
     for line in tax_report_reader.lines() {
         let line = line.expect("Unable to read line from centrifuge file");
-        let fields = line.split("\t").collect::<Vec<&str>>();
+        let fields = line.split('\t').collect::<Vec<&str>>();
 
         match filter_tool {
             FilterTool::Centrifuge => {
@@ -92,7 +92,7 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
                 if score >= current_score {
                     let taxid = fields[2].parse::<u32>().unwrap();
 
-                    if taxonomy.is_descendant_taxid(&taxid, &ancestor_id) {
+                    if taxonomy.is_descendant_taxid(taxid, ancestor_id) {
                         read_valid.insert(id, score);
                     } else if score > current_score {
                         // only reset this to zero if this non-descendant taxid is a better fit
@@ -120,16 +120,15 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
                         let name_or_taxid = fields[2];
                         let taxid = if name_or_taxid.contains("(taxid") {
                             // taxon name output format
-                            let name_parts = name_or_taxid.split(" ").collect::<Vec<&str>>();
+                            let name_parts = name_or_taxid.split(' ').collect::<Vec<&str>>();
                             let last_part = name_parts.last().unwrap();
-                            let taxid_part: &str = last_part.split(")").collect::<Vec<&str>>()[0];
+                            let taxid_part: &str = last_part.split(')').collect::<Vec<&str>>()[0];
                             taxid_part.parse::<u32>().unwrap()
                         } else {
                             name_or_taxid.parse::<u32>().unwrap()
                         };
 
-//                        println!("{} {} {}", id, taxonomy.is_descendant_taxid(&taxid, &ancestor_id), taxid);
-                        if taxonomy.is_descendant_taxid(&taxid, &ancestor_id) {
+                        if taxonomy.is_descendant_taxid(taxid, ancestor_id) {
                             read_valid.insert(id, 1000);  // make up a score for kraken2
                         } else  {
                             read_valid.insert(id, 0);
@@ -144,7 +143,7 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
     println!("keys: {}", read_valid.keys().len());
     let mut valid_records = 0;
     let mut total_records = 0;
-    let filename_parts: Vec<&str>= fastq_filename.file_name().and_then(|s| s.to_str()).unwrap().split(".").collect();
+    let filename_parts: Vec<&str>= fastq_filename.file_name().and_then(|s| s.to_str()).unwrap().split('.').collect();
     let output_filename = output_dir.to_str().unwrap().to_owned() + "/" + &filename_parts[0].to_owned() + ".filtered." + &filename_parts[1..].join(".");
     let output_file = File::create(&output_filename).unwrap_or_else(|_| panic!("Failed to create output file: {}", output_filename));
     let output_encoder: Box<dyn Write> = if output_filename.ends_with(".gz") {
@@ -196,8 +195,6 @@ pub fn main() {
 
     let filter_tool = if matches.is_present("centrifuge") {
         FilterTool::Centrifuge
-    } else if matches.is_present("kraken2") {
-        FilterTool::Kraken2
     } else {
         FilterTool::Kraken2  // default to kraken2
     };

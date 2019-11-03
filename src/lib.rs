@@ -159,12 +159,12 @@ impl NcbiTaxonomy {
     /// is_descendant
     ///
     /// check if a certain node with taxid is a descendant of another taxid
-    pub fn is_descendant_taxid(&self, taxid: &u32, ancestor_taxid: &u32) -> bool {
-        let id = match self.id_to_node.get(taxid) {
+    pub fn is_descendant_taxid(&self, taxid: u32, ancestor_taxid: u32) -> bool {
+        let id = match self.id_to_node.get(&taxid) {
             Some(id) => id,
             None => return false
         };
-        let ancestor_id = match self.id_to_node.get(ancestor_taxid) {
+        let ancestor_id = match self.id_to_node.get(&ancestor_taxid) {
             Some(id) => id,
             None => return false
         };
@@ -289,6 +289,6 @@ mod tests {
     #[test]
     fn taxid_descendants() {
         let fixture = NcbiTaxonomyFixture::default();
-        assert!(fixture.taxonomy.is_descendant_taxid(&504556, &12333));
+        assert!(fixture.taxonomy.is_descendant_taxid(504556, 12333));
     }
 }
