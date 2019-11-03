@@ -4,6 +4,7 @@ extern crate clap;
 extern crate bio;
 extern crate flate2;
 extern crate seq_io;
+extern crate ncbitaxonomy;
 
 use std::fs::{File, create_dir};
 use std::io;
@@ -18,6 +19,7 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use seq_io::fastq::Record;
+use ncbitaxonomy::NcbiTaxonomy;
 
 enum FilterTool {
     Centrifuge,
@@ -33,23 +35,7 @@ impl fmt::Display for FilterTool {
     }
 }
 
-fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
-                tax_prefix: &str, ncbi_taxonomy_path: &Path,
-                output_dir: &Path, filter_tool: &FilterTool, ancestor_id: u32) {
-    if !output_dir.exists() {
-        create_dir(output_dir).unwrap_or_else(|_| panic!("Failed to create output dir {}", output_dir.display()));
-    }
-    let fastq_file = File::open(&fastq_filename).unwrap_or_else(|_| panic!("Failed to open input FASTQ file ({})", fastq_filename.display()));
-    let fastq_decoder: Box<dyn Read> = if fastq_filename.to_str().unwrap().ends_with(".gz") {
-        Box::new(GzDecoder::new(fastq_file))
-    } else {
-        Box::new(fastq_file)
-    };
-    let mut fastq_reader = seq_io::fastq::Reader::new(BufReader::new(fastq_decoder));
-
-    let tax_report_file = File::open(tax_report_filename).unwrap_or_else(|_| panic!("Failed to open input Centrifuge file ({})", tax_report_filename));
-    let tax_report_reader = io::BufReader::new(tax_report_file);
-
+fn read_taxonomy(tax_prefix: &str, ncbi_taxonomy_path: &Path) -> NcbiTaxonomy {
     let nodes_path = ncbi_taxonomy_path.join(tax_prefix.to_owned() + "nodes.dmp");
     if !nodes_path.exists() {
         eprintln!("NCBI Taxonomy {}nodes.dmp file not found in {}", tax_prefix, ncbi_taxonomy_path.to_str().unwrap());
@@ -66,13 +52,27 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
         nodes_path.as_path().to_str().unwrap(),
         names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy");
 
-    if !taxonomy.contains_id(ancestor_id) {
-        eprintln!("Taxonomy does not contain an ancestor with taxid {}", ancestor_id);
-        process::exit(1);
+    return taxonomy
+}
+
+fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
+                taxonomy: &NcbiTaxonomy,
+                output_dir: &Path, filter_tool: &FilterTool, ancestor_id: u32) {
+    if !output_dir.exists() {
+        create_dir(output_dir).unwrap_or_else(|_| panic!("Failed to create output dir {}", output_dir.display()));
     }
+    let fastq_file = File::open(&fastq_filename).unwrap_or_else(|_| panic!("Failed to open input FASTQ file ({})", fastq_filename.display()));
+    let fastq_decoder: Box<dyn Read> = if fastq_filename.to_str().unwrap().ends_with(".gz") {
+        Box::new(GzDecoder::new(fastq_file))
+    } else {
+        Box::new(fastq_file)
+    };
+    let mut fastq_reader = seq_io::fastq::Reader::new(BufReader::new(fastq_decoder));
+
+    let tax_report_file = File::open(tax_report_filename).unwrap_or_else(|_| panic!("Failed to open input Centrifuge file ({})", tax_report_filename));
+    let tax_report_reader = io::BufReader::new(tax_report_file);
 
     let mut read_valid: HashMap<String, u32> = HashMap::new();
-    println!("filter tool {}", filter_tool);
     for line in tax_report_reader.lines() {
         let line = line.expect("Unable to read line from centrifuge file");
         let fields = line.split('\t').collect::<Vec<&str>>();
@@ -140,7 +140,6 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
         };
     }
 
-    println!("keys: {}", read_valid.keys().len());
     let mut valid_records = 0;
     let mut total_records = 0;
     let filename_parts: Vec<&str>= fastq_filename.file_name().and_then(|s| s.to_str()).unwrap().split('.').collect();
@@ -161,7 +160,7 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
             valid_records += 1;
         }
     }
-    println!("{} records written out of {} total records", valid_records, total_records);
+    eprintln!("{} records written out of {} total records", valid_records, total_records);
 }
 
 pub fn main() {
@@ -178,7 +177,7 @@ pub fn main() {
         )
         (@arg OUTPUT_DIR: -d --output_dir "Directory to deposited filtered output files in")
         (@arg TAXONOMY_REPORT_FILENAME: -F --tax_report_filename +takes_value  +required "Output from Kraken2 (default) or Centrifuge")
-        (@arg INPUT_FASTQ: +required "FASTA file with RefSeq sequences")
+        (@arg INPUT_FASTQ: ... +required "FASTA file with RefSeq sequences")
         ).get_matches();
 
     let tax_prefix = match matches.value_of("TAXONOMY_FILENAME_PREFIX") {
@@ -198,14 +197,24 @@ pub fn main() {
     } else {
         FilterTool::Kraken2  // default to kraken2
     };
+    eprintln!("filter tool {}", filter_tool);
 
     let ancestor_id_str = matches.value_of("ANCESTOR_ID").unwrap();
     let ancestor_id = ancestor_id_str.parse::<u32>().unwrap_or_else(|_| panic!("Failed to interpret ({}) as a taxonomy ID", ancestor_id_str));
 
     let tax_report_filename = matches.value_of("TAXONOMY_REPORT_FILENAME").unwrap();
+
+    let taxonomy = read_taxonomy(&tax_prefix, ncbi_taxonomy_path);
+    if !taxonomy.contains_id(ancestor_id) {
+        eprintln!("Taxonomy does not contain an ancestor with taxid {}", ancestor_id);
+        process::exit(1);
+    }
+
     let input_files: Vec<&str> = matches.values_of("INPUT_FASTQ").unwrap().collect();
     for input_file in input_files.iter() {
-        filter_fastq(Path::new(input_file), tax_report_filename, &tax_prefix, ncbi_taxonomy_path,
+        let input_file_path = Path::new(input_file);
+        eprintln!("processing {}", input_file_path.file_name().and_then(|s| s.to_str()).unwrap());
+        filter_fastq(input_file_path, tax_report_filename, &taxonomy,
                      output_dir, &filter_tool, ancestor_id);
     }
 }
