@@ -29,6 +29,8 @@ use std::io::{BufReader,BufRead};
 use indextree::{Arena, NodeId, Traverse};
 pub use indextree::NodeEdge;
 
+pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
 #[derive(Debug)]
 pub struct NcbiTaxonomy {
     arena: Arena<u32>,

@@ -34,15 +34,27 @@ fn wrap(seq: TextSlice, width: usize) -> Vec<u8> {
 
 pub fn main() {
     let matches = clap_app!(taxonomy_filter_refseq =>
-        (version: "0.1.2")
+        (version: ncbitaxonomy::VERSION)
         (author: "Peter van Heusden <pvh@sanbi.axc.za>")
         (about: "Filter NCBI RefSeq FASTA files by taxonomic lineage")
+        (@arg NO_PREDICTED: --no_predicted "Don't accept computationally predicted RNAs and proteins (XM_, XR_ and XP_ accessions)")
+        (@arg NO_CURATED: --no_curated "Don't accept curated RNAs and proteins (NM_, NR_ and NP_ accessions)")
         (@arg TAXONOMY_FILENAME_PREFIX: -t --tax_prefix +takes_value "String to prepend to names of nodes.dmp and names.dmp")
         (@arg INPUT_FASTA: +required "FASTA file with RefSeq sequences")
         (@arg TAXONOMY_DIR: +required "Directory containing the NCBI taxonomy nodes.dmp and names.dmp files")
         (@arg ANCESTOR_NAME: +required "Name of ancestor to use as ancestor filter")
         (@arg OUTPUT_FASTA: "Output FASTA filename (or stdout if omitted)")
         ).get_matches();
+
+    let no_predicted = match matches.occurrences_of("NO_PREDICTED") {
+        0 => false,
+        _ => true
+    };
+
+    let no_curated = match matches.occurrences_of("NO_CURATED") {
+        0 => false,
+        _ => true
+    };
 
     let input_fasta_filename = matches.value_of("INPUT_FASTA").unwrap();
     let input_fasta = File::open(input_fasta_filename).unwrap_or_else(|_| panic!("Failed to open input FASTA file ({})", input_fasta_filename));
@@ -94,10 +106,11 @@ pub fn main() {
             Some(desc) => desc,
             None => "unknown"
         };
+        let division = record.id().as_bytes()[0];
         let species_start = description.find('[').unwrap_or_else(|| panic!("[ missing in description ({})", description));
         let species_end = description.rfind(']').unwrap_or_else(|| panic!("] missing in description ({})", description));
         let species_name = &description[(species_start+1)..species_end];
-        if taxonomy.contains_name(species_name) && taxonomy.is_descendant(species_name, ancestor_name) {
+        if !(no_predicted && (division == b'X' || division == b'Y')) && !(no_curated && (division == b'N' || division == b'A' || division == b'W')) && taxonomy.contains_name(species_name) && taxonomy.is_descendant(species_name, ancestor_name) {
             output_fasta.write(record.id(), record.desc(), wrap(record.seq(), 80).as_slice()).unwrap();
         }
     }

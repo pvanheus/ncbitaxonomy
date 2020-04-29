@@ -26,6 +26,8 @@ USAGE:
     taxonomy_filter_refseq [OPTIONS] <INPUT_FASTA> <TAXONOMY_DIR> <ANCESTOR_NAME> [OUTPUT_FASTA]
 
 FLAGS:
+        --no_curated      Don't accept curated RNAs and proteins (NM_, NR_ and NP_ accessions)
+        --no_predicted    Don't accept computationally predicted RNAs and proteins (XM_, XR_ and XP_ accessions)
     -h, --help       Prints help information
     -V, --version    Prints version information
 

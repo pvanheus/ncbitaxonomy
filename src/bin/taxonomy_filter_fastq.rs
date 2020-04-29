@@ -165,7 +165,7 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
 
 pub fn main() {
     let matches = clap_app!(taxonomy_filter_refseq =>
-        (version: "0.1.2")
+        (version: ncbitaxonomy::VERSION)
         (author: "Peter van Heusden <pvh@sanbi.axc.za>")
         (about: "Filter NCBI RefSeq FASTA files by taxonomic lineage")
         (@arg TAXONOMY_FILENAME_PREFIX: -t --tax_prefix +takes_value "String to prepend to names of nodes.dmp and names.dmp")
