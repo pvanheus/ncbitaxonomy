@@ -212,6 +212,7 @@ impl NcbiTaxonomy {
     ///
     /// get the distance (in steps in the tree) between taxid1 and the common ancestor with taxid2
     pub fn get_distance_to_common_ancestor_id(&self, taxid1: u32, taxid2: u32, only_canonical: bool) -> Option<u32> {
+        // canonical ranks (+ superkingdom) as they appear in the NCBI taxonomy database
         let canonical_ranks: HashSet<String>  = HashSet::from_iter(vec!["superkingdom", "kingdom", "phylum", "class", "order", "family", "genus", "species"].iter().map(|x| x.to_string()));
         if taxid1 == taxid2 {
             return Some(0)
