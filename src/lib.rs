@@ -21,11 +21,12 @@ pub enum NcbiTaxonomyError {
     ParseIntError(#[from] ::std::num::ParseIntError)
 }
 
-use std::collections::{HashMap};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufReader,BufRead};
 use indextree::{Arena, NodeId, Traverse};
 pub use indextree::NodeEdge;
+use std::iter::FromIterator;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -35,6 +36,7 @@ pub struct NcbiTaxonomy {
     name_to_node: HashMap<String, NodeId>,
     id_to_node: HashMap<u32, NodeId>,
     id_to_name: HashMap<u32, String>,
+    id_to_rank: HashMap<u32, String>
 }
 
 impl NcbiTaxonomy {
@@ -53,22 +55,21 @@ impl NcbiTaxonomy {
     /// ```
     pub fn from_ncbi_files(nodes_filename: &str, names_filename: &str) -> Result<NcbiTaxonomy, NcbiTaxonomyError> {
         let mut child_ids_by_parent_id: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut id_to_rank = HashMap::new();
         let nodes_file = File::open(nodes_filename)?;
         for line_maybe in BufReader::new(nodes_file).lines() {
-            match line_maybe {
-                Ok(line) => {
-                    let mut fields = line.split("\t|\t");
-                    let id_str = fields.next().ok_or_else(|| NcbiTaxonomyError::NodeFileFormatError(line.clone()))?;
-                    let parent_id_str = fields.next().ok_or_else(|| NcbiTaxonomyError::NodeFileFormatError(line.clone()))?;
-                    let id = id_str.parse::<u32>().or_else(|e| Err(NcbiTaxonomyError::ParseIntError(e)))?;
-                    let parent_id = parent_id_str.parse::<u32>().or_else(|e| Err(NcbiTaxonomyError::ParseIntError(e)))?;
-                    if parent_id != id {  // this happens for the root node
-                        // thanks to https://stackoverflow.com/questions/33243784/append-to-vector-as-value-of-hashmap/33243862
-                        // for this way to get the existing entry or insert an empty list.
-                        child_ids_by_parent_id.entry(parent_id).or_insert_with(Vec::new).push(id);
-                    }
-                },
-                Err(e) => return Err(NcbiTaxonomyError::Io(e))
+            let line = line_maybe?;
+            let mut fields = line.split("\t|\t");
+            let id_str = fields.next().ok_or_else(|| NcbiTaxonomyError::NodeFileFormatError(line.clone()))?;
+            let parent_id_str = fields.next().ok_or_else(|| NcbiTaxonomyError::NodeFileFormatError(line.clone()))?;
+            let rank = fields.next().ok_or_else(|| NcbiTaxonomyError::NodeFileFormatError(line.clone()))?.to_string();
+            let id = id_str.parse::<u32>().or_else(|e| Err(NcbiTaxonomyError::ParseIntError(e)))?;
+            let parent_id = parent_id_str.parse::<u32>().or_else(|e| Err(NcbiTaxonomyError::ParseIntError(e)))?;
+            id_to_rank.insert(id, rank);
+            if parent_id != id {  // this happens for the root node
+                // thanks to https://stackoverflow.com/questions/33243784/append-to-vector-as-value-of-hashmap/33243862
+                // for this way to get the existing entry or insert an empty list.
+                child_ids_by_parent_id.entry(parent_id).or_insert_with(Vec::new).push(id);
             }
         }
 
@@ -100,10 +101,7 @@ impl NcbiTaxonomy {
         let mut id_to_name = HashMap::new();
         let name_file = File::open(names_filename)?;
         for line_maybe in BufReader::new(name_file).lines() {
-            let line = match line_maybe {
-                Ok(line) => line,
-                Err(e) => return Err(NcbiTaxonomyError::Io(e))
-            };
+            let line = line_maybe?;
             let fields = line.split("\t|\t").collect::<Vec<&str>>();
             if fields[3].starts_with("scientific name") {
                 let id_str = fields[0];
@@ -115,7 +113,7 @@ impl NcbiTaxonomy {
             }
         }
 
-        let tree = NcbiTaxonomy { arena, name_to_node, id_to_node, id_to_name };
+        let tree = NcbiTaxonomy { arena, name_to_node, id_to_node, id_to_name, id_to_rank };
         Ok(tree)
     }
 
@@ -213,27 +211,25 @@ impl NcbiTaxonomy {
     /// get_distance_to_common_ancestor_id
     ///
     /// get the distance (in steps in the tree) between taxid1 and the common ancestor with taxid2
-    pub fn get_distance_to_common_ancestor_id(&self, taxid1: u32, taxid2: u32) -> Option<u32> {
+    pub fn get_distance_to_common_ancestor_id(&self, taxid1: u32, taxid2: u32, only_canonical: bool) -> Option<u32> {
+        let canonical_ranks: HashSet<String>  = HashSet::from_iter(vec!["superkingdom", "kingdom", "phylum", "class", "order", "family", "genus", "species"].iter().map(|x| x.to_string()));
         if taxid1 == taxid2 {
             return Some(0)
         }
 
-        let taxon1 = match self.id_to_node.get(&taxid1) {
-            Some(val) => val,
-            None => return None
-        };
-        let taxon2 = match self.id_to_node.get(&taxid2) {
-            Some(val) => val,
-            None => return None
-        };
-
+        let taxon1 = self.id_to_node.get(&taxid1)?;
+        let taxon2 = self.id_to_node.get(&taxid2)?;
 
         let mut ancestors_distance1 = HashMap::new();
         let mut current_distance = 0;
         ancestors_distance1.insert(taxid1, current_distance);
         for node in taxon1.ancestors(&self.arena) {
-            current_distance += 1;
-            ancestors_distance1.insert(self.get_id_by_node(node).unwrap(), current_distance);
+            let nodeid = self.get_id_by_node(node)?;
+            let rank = self.id_to_rank.get(&nodeid)?;
+            if !only_canonical || canonical_ranks.contains(rank) {
+                current_distance += 1;
+                ancestors_distance1.insert(self.get_id_by_node(node).unwrap(), current_distance);
+            }
         }
 
         // if the ancestors_distance1 map contains taxid2
@@ -245,12 +241,16 @@ impl NcbiTaxonomy {
 
         current_distance = 0;
         for node in taxon2.ancestors(&self.arena) {
-            current_distance += 1;
             let nodeid = self.get_id_by_node(node).unwrap();
-            if ancestors_distance1.contains_key(&nodeid) {
-                // the distance to te common ancestor is the distance from taxon2
-                // to an ancestor that is also an ancestor to taxon1
-                return Some(current_distance)
+            let rank = self.id_to_rank.get(&nodeid)?;
+            if !only_canonical || canonical_ranks.contains(rank) {
+                current_distance += 1;
+                if ancestors_distance1.contains_key(&nodeid) {
+                    // the distance to te common ancestor is the distance from taxon2
+                    // to an ancestor that is also an ancestor to taxon1
+                    // eprintln!("common ancestor {} {} {} {} {}", self.id_to_name.get(&nodeid)?, nodeid, rank, canonical_ranks.contains(rank), current_distance);
+                    return Some(current_distance)
+                }
             }
         }
         None
@@ -259,19 +259,13 @@ impl NcbiTaxonomy {
     /// get_distance_to_common_ancestor
     ///
     /// find the distance in the tree between name1 and name2
-    pub fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str) -> Option<u32> {
-        let taxon1 = match self.name_to_node.get(name1) {
-            Some(nodeid) => nodeid,
-            None => return None
-        };
+    pub fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str, only_canonical: bool) -> Option<u32> {
+        let taxon1 = self.name_to_node.get(name1)?;
 
-        let taxon2 = match self.name_to_node.get(name2) {
-            Some(nodeid) => nodeid,
-            None => return None
-        };
+        let taxon2 = self.name_to_node.get(name2)?;
 
         self.get_distance_to_common_ancestor_id(self.get_id_by_node(*taxon1).unwrap(),
-                                                self.get_id_by_node(*taxon2).unwrap())
+                                                self.get_id_by_node(*taxon2).unwrap(), only_canonical)
     }
 
     // TODO write tests for get_distance_to_common_ancestor and get_distance_to_common_ancestor_id
