@@ -6,7 +6,7 @@ authors = ["Peter van Heusden <pvh@sanbi.ac.za>"]
 license = "MIT"
 
 [dependencies]
-error-chain = "~0.12"
+thiserror = "~1.0"
 indextree = "~3"
 bio = "~0.25"
 clap = "~2.32"

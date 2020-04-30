@@ -48,11 +48,9 @@ fn read_taxonomy(tax_prefix: &str, ncbi_taxonomy_path: &Path) -> NcbiTaxonomy {
         process::exit(1);
     }
 
-    let taxonomy = ncbitaxonomy::NcbiTaxonomy::from_ncbi_files(
+    ncbitaxonomy::NcbiTaxonomy::from_ncbi_files(
         nodes_path.as_path().to_str().unwrap(),
-        names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy");
-
-    return taxonomy
+        names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy")
 }
 
 fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
@@ -152,7 +150,7 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
     };
     let mut output_writer = BufWriter::new(output_encoder );
     while let Some(result) = fastq_reader.next() {
-        let record = result.expect("Error reading record");;
+        let record = result.expect("Error reading record");
         let id = record.id().unwrap();
         total_records += 1;
         if read_valid.contains_key(id) && *read_valid.get(id).unwrap() > 0 {

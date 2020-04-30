@@ -1,35 +1,33 @@
 #![recursion_limit = "1024"]
-#[macro_use]
-extern crate error_chain;
 
+extern crate thiserror;
 extern crate indextree;
+extern crate core;
+extern crate seq_io;
+extern crate clap;
 
 /// ncbitaxonomy: a module for working with a local copy of the NCBI taxonomy database
 
-mod errors {
-    error_chain! {
-        foreign_links {
-            Io(::std::io::Error) #[doc = "Io"];
-            ParseIntError(::std::num::ParseIntError);
-        }
-        errors {
-            NodeFileFormatError(l: String) {
-                description("format error in nodes.dmp file")
-                display("format error in nodes.dmp in line {}", l)
-            }
-        }
-    }
+use thiserror::Error;
+use std::io;
+
+#[derive(Error, Debug)]
+pub enum NcbiTaxonomyError {
+    #[error("I/O error opening or reading file")]
+    Io(#[from] io::Error),
+    #[error("format error in nodes.dmp in line {0}")]
+    NodeFileFormatError(String),
+    #[error("failed to parse integer from string {0}")]
+    ParseIntError(#[from] ::std::num::ParseIntError)
 }
 
-use self::errors::*;
-
-use std::collections::HashMap;
+use std::collections::{HashMap};
 use std::fs::File;
 use std::io::{BufReader,BufRead};
 use indextree::{Arena, NodeId, Traverse};
 pub use indextree::NodeEdge;
 
-pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug)]
 pub struct NcbiTaxonomy {
@@ -53,24 +51,24 @@ impl NcbiTaxonomy {
     ///
     /// let taxonomy = NcbiTaxonomy::from_ncbi_files("data/nodes.dmp", "data/names.dmp");
     /// ```
-    pub fn from_ncbi_files(nodes_filename: &str, names_filename: &str) -> Result<NcbiTaxonomy> {
+    pub fn from_ncbi_files(nodes_filename: &str, names_filename: &str) -> Result<NcbiTaxonomy, NcbiTaxonomyError> {
         let mut child_ids_by_parent_id: HashMap<u32, Vec<u32>> = HashMap::new();
         let nodes_file = File::open(nodes_filename)?;
         for line_maybe in BufReader::new(nodes_file).lines() {
             match line_maybe {
                 Ok(line) => {
                     let mut fields = line.split("\t|\t");
-                    let id_str = fields.next().chain_err(|| ErrorKind::NodeFileFormatError(line.clone()))?;
-                    let parent_id_str = fields.next().chain_err(|| ErrorKind::NodeFileFormatError(line.clone()))?;
-                    let id = id_str.parse::<u32>().chain_err(|| format!("failed to parse id_str as u32: {}", id_str))?;
-                    let parent_id = parent_id_str.parse::<u32>().chain_err(|| format!("failed to parse parent_id_str as u32: {}", parent_id_str))?;
+                    let id_str = fields.next().ok_or_else(|| NcbiTaxonomyError::NodeFileFormatError(line.clone()))?;
+                    let parent_id_str = fields.next().ok_or_else(|| NcbiTaxonomyError::NodeFileFormatError(line.clone()))?;
+                    let id = id_str.parse::<u32>().or_else(|e| Err(NcbiTaxonomyError::ParseIntError(e)))?;
+                    let parent_id = parent_id_str.parse::<u32>().or_else(|e| Err(NcbiTaxonomyError::ParseIntError(e)))?;
                     if parent_id != id {  // this happens for the root node
                         // thanks to https://stackoverflow.com/questions/33243784/append-to-vector-as-value-of-hashmap/33243862
                         // for this way to get the existing entry or insert an empty list.
                         child_ids_by_parent_id.entry(parent_id).or_insert_with(Vec::new).push(id);
                     }
                 },
-                Err(e) => return Err(ErrorKind::Io(e).into())
+                Err(e) => return Err(NcbiTaxonomyError::Io(e))
             }
         }
 
@@ -104,12 +102,12 @@ impl NcbiTaxonomy {
         for line_maybe in BufReader::new(name_file).lines() {
             let line = match line_maybe {
                 Ok(line) => line,
-                Err(e) => return Err(ErrorKind::Io(e).into())
+                Err(e) => return Err(NcbiTaxonomyError::Io(e))
             };
             let fields = line.split("\t|\t").collect::<Vec<&str>>();
             if fields[3].starts_with("scientific name") {
                 let id_str = fields[0];
-                let id = id_str.parse::<u32>().chain_err(|| format!("failed to parse id_str as u32: {}", id_str))?;
+                let id = id_str.parse::<u32>().or_else(|e| Err(NcbiTaxonomyError::ParseIntError(e)))?;
                 let name = fields[1].to_string();
                 let node_id = id_to_node.get(&id).expect("ID not found in id_to_node");
                 id_to_name.insert(id, name.clone());
@@ -211,6 +209,72 @@ impl NcbiTaxonomy {
     pub fn get_name_by_id(&self, id: u32) -> Option<&String> {
         self.id_to_name.get(&id)
     }
+
+    /// get_distance_to_common_ancestor_id
+    ///
+    /// get the distance (in steps in the tree) between taxid1 and the common ancestor with taxid2
+    pub fn get_distance_to_common_ancestor_id(&self, taxid1: u32, taxid2: u32) -> Option<u32> {
+        if taxid1 == taxid2 {
+            return Some(0)
+        }
+
+        let taxon1 = match self.id_to_node.get(&taxid1) {
+            Some(val) => val,
+            None => return None
+        };
+        let taxon2 = match self.id_to_node.get(&taxid2) {
+            Some(val) => val,
+            None => return None
+        };
+
+
+        let mut ancestors_distance1 = HashMap::new();
+        let mut current_distance = 0;
+        ancestors_distance1.insert(taxid1, current_distance);
+        for node in taxon1.ancestors(&self.arena) {
+            current_distance += 1;
+            ancestors_distance1.insert(self.get_id_by_node(node).unwrap(), current_distance);
+        }
+
+        // if the ancestors_distance1 map contains taxid2
+        // then taxon2 is an ancestor of taxon1 and we return
+        // the distnace between taxon1 and this ancestor
+        if ancestors_distance1.contains_key(&taxid2) {
+            return Some(*ancestors_distance1.get(&taxid2).unwrap());
+        }
+
+        current_distance = 0;
+        for node in taxon2.ancestors(&self.arena) {
+            current_distance += 1;
+            let nodeid = self.get_id_by_node(node).unwrap();
+            if ancestors_distance1.contains_key(&nodeid) {
+                // the distance to te common ancestor is the distance from taxon2
+                // to an ancestor that is also an ancestor to taxon1
+                return Some(current_distance)
+            }
+        }
+        None
+    }
+
+    /// get_distance_to_common_ancestor
+    ///
+    /// find the distance in the tree between name1 and name2
+    pub fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str) -> Option<u32> {
+        let taxon1 = match self.name_to_node.get(name1) {
+            Some(nodeid) => nodeid,
+            None => return None
+        };
+
+        let taxon2 = match self.name_to_node.get(name2) {
+            Some(nodeid) => nodeid,
+            None => return None
+        };
+
+        self.get_distance_to_common_ancestor_id(self.get_id_by_node(*taxon1).unwrap(),
+                                                self.get_id_by_node(*taxon2).unwrap())
+    }
+
+    // TODO write tests for get_distance_to_common_ancestor and get_distance_to_common_ancestor_id
 }
 
 #[cfg(test)]
