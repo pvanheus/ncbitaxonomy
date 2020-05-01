@@ -12,3 +12,5 @@ bio = "~0.25"
 clap = "~2.32"
 seq_io = "~0.3"
 flate2 = "~1"
+diesel = { version = "~1", features = ["postgres", "sqlite"] }
+dotenv = "~0.9"

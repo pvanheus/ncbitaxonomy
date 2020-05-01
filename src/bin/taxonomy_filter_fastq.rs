@@ -19,7 +19,7 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use seq_io::fastq::Record;
-use ncbitaxonomy::NcbiTaxonomy;
+use ncbitaxonomy::{NcbiTaxonomy, NcbiFileTaxonomy};
 
 enum FilterTool {
     Centrifuge,
@@ -35,7 +35,7 @@ impl fmt::Display for FilterTool {
     }
 }
 
-fn read_taxonomy(tax_prefix: &str, ncbi_taxonomy_path: &Path) -> NcbiTaxonomy {
+fn read_taxonomy(tax_prefix: &str, ncbi_taxonomy_path: &Path) -> NcbiFileTaxonomy {
     let nodes_path = ncbi_taxonomy_path.join(tax_prefix.to_owned() + "nodes.dmp");
     if !nodes_path.exists() {
         eprintln!("NCBI Taxonomy {}nodes.dmp file not found in {}", tax_prefix, ncbi_taxonomy_path.to_str().unwrap());
@@ -48,14 +48,14 @@ fn read_taxonomy(tax_prefix: &str, ncbi_taxonomy_path: &Path) -> NcbiTaxonomy {
         process::exit(1);
     }
 
-    ncbitaxonomy::NcbiTaxonomy::from_ncbi_files(
+    ncbitaxonomy::NcbiFileTaxonomy::from_ncbi_files(
         nodes_path.as_path().to_str().unwrap(),
         names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy")
 }
 
 fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
-                taxonomy: &NcbiTaxonomy,
-                output_dir: &Path, filter_tool: &FilterTool, ancestor_id: u32) {
+                taxonomy: &dyn NcbiTaxonomy,
+                output_dir: &Path, filter_tool: &FilterTool, ancestor_id: i32) {
     if !output_dir.exists() {
         create_dir(output_dir).unwrap_or_else(|_| panic!("Failed to create output dir {}", output_dir.display()));
     }
@@ -70,7 +70,7 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
     let tax_report_file = File::open(tax_report_filename).unwrap_or_else(|_| panic!("Failed to open input Centrifuge file ({})", tax_report_filename));
     let tax_report_reader = io::BufReader::new(tax_report_file);
 
-    let mut read_valid: HashMap<String, u32> = HashMap::new();
+    let mut read_valid: HashMap<String, i32> = HashMap::new();
     for line in tax_report_reader.lines() {
         let line = line.expect("Unable to read line from centrifuge file");
         let fields = line.split('\t').collect::<Vec<&str>>();
@@ -82,13 +82,13 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
                     continue;
                 }
                 let id = fields[0].to_owned();
-                let score = fields[3].parse::<u32>().unwrap_or_else(|_| panic!("Failed to read score from ({})", fields[3]));
+                let score = fields[3].parse::<i32>().unwrap_or_else(|_| panic!("Failed to read score from ({})", fields[3]));
                 let current_score = match read_valid.get(&id) {
                     Some(value) => *value,
                     None => 0
                 };
                 if score >= current_score {
-                    let taxid = fields[2].parse::<u32>().unwrap();
+                    let taxid = fields[2].parse::<i32>().unwrap();
 
                     if taxonomy.is_descendant_taxid(taxid, ancestor_id) {
                         read_valid.insert(id, score);
@@ -121,9 +121,9 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
                             let name_parts = name_or_taxid.split(' ').collect::<Vec<&str>>();
                             let last_part = name_parts.last().unwrap();
                             let taxid_part: &str = last_part.split(')').collect::<Vec<&str>>()[0];
-                            taxid_part.parse::<u32>().unwrap()
+                            taxid_part.parse::<i32>().unwrap()
                         } else {
-                            name_or_taxid.parse::<u32>().unwrap()
+                            name_or_taxid.parse::<i32>().unwrap()
                         };
 
                         if taxonomy.is_descendant_taxid(taxid, ancestor_id) {
@@ -198,7 +198,7 @@ pub fn main() {
     eprintln!("filter tool {}", filter_tool);
 
     let ancestor_id_str = matches.value_of("ANCESTOR_ID").unwrap();
-    let ancestor_id = ancestor_id_str.parse::<u32>().unwrap_or_else(|_| panic!("Failed to interpret ({}) as a taxonomy ID", ancestor_id_str));
+    let ancestor_id = ancestor_id_str.parse::<i32>().unwrap_or_else(|_| panic!("Failed to interpret ({}) as a taxonomy ID", ancestor_id_str));
 
     let tax_report_filename = matches.value_of("TAXONOMY_REPORT_FILENAME").unwrap();
 

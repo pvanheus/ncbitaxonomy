@@ -4,9 +4,9 @@ extern crate ncbitaxonomy;
 
 use std::path::Path;
 use std::process;
-use ncbitaxonomy::NcbiTaxonomy;
+use ncbitaxonomy::{NcbiTaxonomy, NcbiSqliteTaxonomy};
 
-fn common_ancestor_distance(taxonomy: &NcbiTaxonomy, name1: &str, name2: &str, only_canonical: bool) {
+fn common_ancestor_distance(taxonomy: &dyn NcbiTaxonomy, name1: &str, name2: &str, only_canonical: bool) {
     match taxonomy.get_distance_to_common_ancestor(name1, name2, only_canonical) {
         Some(distance) => {
             println!("{}", distance);
@@ -39,6 +39,9 @@ pub fn main() {
             (about: "find name for taxonomy ID")
             (@arg ID: +required "Taxonomy ID to look up")
         )
+        (@subcommand sqlite =>
+            (about: "sqlite testing")
+        )
     ).get_matches();
 
     let ncbi_taxonomy_path = Path::new(app_m.value_of("TAXONOMY_DIR").unwrap());
@@ -61,7 +64,7 @@ pub fn main() {
     }
 
     eprintln!("loading taxonomy");
-    let taxonomy = ncbitaxonomy::NcbiTaxonomy::from_ncbi_files(
+    let taxonomy = ncbitaxonomy::NcbiFileTaxonomy::from_ncbi_files(
         nodes_path.as_path().to_str().unwrap(),
         names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy");
     eprintln!("taxonomy loaded");
@@ -74,10 +77,16 @@ pub fn main() {
             common_ancestor_distance(&taxonomy, name1, name2, only_canonical);
         },
         ("find_id", Some(sub_m)) => {
+            let taxid = (sub_m.value_of("NAME").unwrap()).parse::<i32>().unwrap();
+            let taxonomy = NcbiSqliteTaxonomy::new(None);
+            println!("{}", taxonomy.contains_id(taxid))
 
         },
         ("find_name", Some(sub_m)) => {
 
+        },
+        ("sqlite", Some(sub_m)) => {
+            taxonomy.save_to_sqlite().expect("failed to save taxonomy database to SQLite");
         },
         _ => {
             eprintln!("Unknown subcommand");

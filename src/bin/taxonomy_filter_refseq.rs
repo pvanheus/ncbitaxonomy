@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate clap;
-
 extern crate bio;
+extern crate ncbitaxonomy;
 
 use std::cmp;
 use std::fs::File;
@@ -12,6 +12,8 @@ use std::vec::Vec;
 
 use bio::io::fasta;
 use bio::utils::TextSlice;
+
+use ncbitaxonomy::{NcbiTaxonomy, NcbiFileTaxonomy};
 
 // wrap a TextSlice (a rust-bio name for a &[u8] i.e. byte array)
 // at a certain width (e.g. 80 to look like NCBI RefSeq)
@@ -91,7 +93,7 @@ pub fn main() {
 
     let ancestor_name = matches.value_of("ANCESTOR_NAME").unwrap();
 
-    let taxonomy = ncbitaxonomy::NcbiTaxonomy::from_ncbi_files(
+    let taxonomy = NcbiFileTaxonomy::from_ncbi_files(
         nodes_path.as_path().to_str().unwrap(),
         names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy");
 
