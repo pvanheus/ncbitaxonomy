@@ -7,7 +7,6 @@ authors = ["Peter van Heusden <pvh@sanbi.ac.za>"]
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/pvanheus/ncbitaxonomy"
-license-file = "LICENSE"
 keywords = ["bioinformatics", "taxonomy"]
 categories = ["command-line-utilities", "parser-implementations", "science"]
 default-run = "taxonomy_util"
