@@ -52,6 +52,11 @@ fn establish_connection() -> SqliteConnection {
         .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }
 
+fn get_canonical_ranks() -> HashSet<String> {
+    // canonical ranks (+ superkingdom) as they appear in the NCBI taxonomy database
+    HashSet::from_iter(vec!["superkingdom", "kingdom", "phylum", "class", "order", "family", "genus", "species"].iter().map(|x| (*x).to_string()))
+}
+
 pub trait NcbiTaxonomy {
     fn contains_id(&self, taxid: i32) -> bool;
     fn contains_name(&self, name: &str) -> bool;
@@ -163,12 +168,12 @@ impl NcbiFileTaxonomy {
                 let ancestors_string = ancestors_vec.join("/");
                 let name = self.id_to_name.get(id).unwrap();
                 let taxon_record = NewTaxon {
-                    id: id,
+                    id,
                     ancestry: match ancestors_string  {
                         v if v == "1" => None,
                         _ => Some(&ancestors_string[..])
                     },
-                    name: name,
+                    name,
                     rank: match self.id_to_rank.get(id) {
                         Some(v) => Some(&v[..]),
                         None => None
@@ -285,9 +290,7 @@ impl NcbiTaxonomy for NcbiFileTaxonomy {
     ///
     /// get the distance (in steps in the tree) between taxid1 and the common ancestor with taxid2
     fn get_distance_to_common_ancestor_taxid(&self, taxid1: i32, taxid2: i32, only_canonical: bool) -> Option<i32> {
-        // TODO: make canonical ranks into a module constant somehow
-        // canonical ranks (+ superkingdom) as they appear in the NCBI taxonomy database
-        let canonical_ranks: HashSet<String>  = HashSet::from_iter(vec!["superkingdom", "kingdom", "phylum", "class", "order", "family", "genus", "species"].iter().map(|x| x.to_string()));
+        let canonical_ranks = get_canonical_ranks();
         if taxid1 == taxid2 {
             return Some(0)
         }
@@ -301,7 +304,7 @@ impl NcbiTaxonomy for NcbiFileTaxonomy {
         if !only_canonical || canonical_ranks.contains(taxid1_rank) {
             // we know that taxid1 != taxid2, so either taxid2 is an ancestor of
             // taxid1 or there is a common ancestor further back. in the first case,
-            // taxid2 will be found in the ancestors of taxid1, so this distance will
+            // taxid2 will be found in the ancestors of taxid1, so thifs distance will
             // not be used. in the second case, taxid1 might be found in the ancestors
             // of taxid2, so this distance will still not be used
             ancestors_distance1.insert(taxid1, 0);
@@ -385,7 +388,9 @@ impl NcbiSqliteTaxonomy {
         match ancestry_string {
             None => vec![], // the root taxon has no ancestry
             Some(val) => {
-                val.split("/").map(|id_str| id_str.parse::<i32>().unwrap()).collect()
+                let mut ancestors: Vec<i32> = val.split('/').map(|id_str| id_str.parse::<i32>().unwrap()).collect();
+                ancestors.reverse();
+                ancestors
             }
         }
     }
@@ -499,7 +504,7 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
 
     fn get_distance_to_common_ancestor_taxid(&self, taxid1: i32, taxid2: i32, only_canonical: bool) -> Option<i32> {
         // canonical ranks (+ superkingdom) as they appear in the NCBI taxonomy database
-        let canonical_ranks: HashSet<String>  = HashSet::from_iter(vec!["superkingdom", "kingdom", "phylum", "class", "order", "family", "genus", "species"].iter().map(|x| x.to_string()));
+        let canonical_ranks = get_canonical_ranks();
 
         if taxid1 == taxid2 {
             return Some(0)
@@ -527,6 +532,7 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
         current_distance = 0;
         for taxid in self.get_ancestors(taxid2) {
             let current_rank = self.get_rank(taxid)?;
+            eprintln!("{}", self.get_name_by_id(taxid).unwrap());
             if !only_canonical || canonical_ranks.contains(&current_rank) {
                 current_distance += 1;
                 if ancestors_distance1.contains_key(&taxid) {
@@ -571,6 +577,8 @@ mod tests {
         pub taxonomy: NcbiSqliteTaxonomy,
     }
 
+
+    // TODO: built this in memory on the fly
     impl Default for NcbiSqliteTaxonomyFixture {
         fn default() -> Self {
             let tree = NcbiSqliteTaxonomy::new(Some("data/ncbi_taxonomy.sqlite"));

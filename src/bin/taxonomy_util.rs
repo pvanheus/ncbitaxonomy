@@ -23,8 +23,7 @@ pub fn main() {
         (version: ncbitaxonomy::VERSION)
         (author: "Peter van Heusden <pvh@sanbi.axc.za>")
         (about: "Utilities for working with the NCBI taxonomy database")
-        (@arg TAXONOMY_FILENAME_PREFIX: -t --tax_prefix +takes_value "String to prepend to names of nodes.dmp and names.dmp")
-        (@arg TAXONOMY_DIR: +required "Directory containing the NCBI taxonomy nodes.dmp and names.dmp files")
+        (@arg TAXDB_URL: -d --db +takes_value "URL for SQLite taxonomy database")
         (@subcommand common_ancestor_distance =>
             (about: "find the tree distance to te common ancestor between two taxa")
             (@arg CANONICAL: --only_canonical "Only consider canonical taxonomic ranks")
@@ -41,33 +40,14 @@ pub fn main() {
         )
         (@subcommand sqlite =>
             (about: "sqlite testing")
+            (@arg TAXONOMY_FILENAME_PREFIX: -t --tax_prefix +takes_value "String to prepend to names of nodes.dmp and names.dmp")
+            (@arg TAXONOMY_DIR: "Directory containing the NCBI taxonomy nodes.dmp and names.dmp files")
         )
     ).get_matches();
 
-    let ncbi_taxonomy_path = Path::new(app_m.value_of("TAXONOMY_DIR").unwrap());
+    let taxdb_url = if app_m.is_present("TAXDB_URL") { Some(app_m.value_of("TAXDB_URL").unwrap()) } else { None };
 
-    let tax_prefix = match app_m.value_of("TAXONOMY_FILENAME_PREFIX") {
-        Some(name) => name,
-        None => ""
-    }.to_string();
-
-    let nodes_path = ncbi_taxonomy_path.join(tax_prefix.clone() + "nodes.dmp");
-    if ! nodes_path.exists() {
-        eprintln!("NCBI Taxonomy {}nodes.dmp file not found in {}", tax_prefix, ncbi_taxonomy_path.to_str().unwrap());
-        process::exit(1);
-    }
-
-    let names_path = ncbi_taxonomy_path.join(tax_prefix.clone() + "names.dmp");
-    if ! names_path.exists() {
-        eprintln!("NCBI Taxonomy {}names.dmp file not found in {}", tax_prefix, ncbi_taxonomy_path.to_str().unwrap());
-        process::exit(1);
-    }
-
-    eprintln!("loading taxonomy");
-    let taxonomy = ncbitaxonomy::NcbiFileTaxonomy::from_ncbi_files(
-        nodes_path.as_path().to_str().unwrap(),
-        names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy");
-    eprintln!("taxonomy loaded");
+    let taxonomy = NcbiSqliteTaxonomy::new(taxdb_url);
 
     match app_m.subcommand() {
         ("common_ancestor_distance", Some(sub_m)) => {
@@ -77,15 +57,45 @@ pub fn main() {
             common_ancestor_distance(&taxonomy, name1, name2, only_canonical);
         },
         ("find_id", Some(sub_m)) => {
-            let taxid = (sub_m.value_of("NAME").unwrap()).parse::<i32>().unwrap();
-            let taxonomy = NcbiSqliteTaxonomy::new(None);
-            println!("{}", taxonomy.contains_id(taxid))
-
+            let name = sub_m.value_of("NAME").unwrap();
+            match taxonomy.get_id_by_name(name) {
+                Some(val) => println!("{}", val),
+                None => eprintln!("name {} not found in taxomomy", name)
+            }
         },
         ("find_name", Some(sub_m)) => {
-
+            let taxid = (sub_m.value_of("ID").unwrap()).parse::<i32>().unwrap();
+            match taxonomy.get_name_by_id(taxid) {
+                Some(val) => println!("{}", val),
+                None => eprintln!("id {} not found in taxonomy", taxid)
+            }
         },
-        ("sqlite", Some(sub_m)) => {
+        ("to_sqlite", Some(sub_m)) => {
+            let ncbi_taxonomy_path = Path::new(sub_m.value_of("TAXONOMY_DIR").unwrap());
+
+            let tax_prefix = match sub_m.value_of("TAXONOMY_FILENAME_PREFIX") {
+                Some(name) => name,
+                None => ""
+            }.to_string();
+
+            let nodes_path = ncbi_taxonomy_path.join(tax_prefix.clone() + "nodes.dmp");
+            if ! nodes_path.exists() {
+                eprintln!("NCBI Taxonomy {}nodes.dmp file not found in {}", tax_prefix, ncbi_taxonomy_path.to_str().unwrap());
+                process::exit(1);
+            }
+
+            let names_path = ncbi_taxonomy_path.join(tax_prefix.clone() + "names.dmp");
+            if ! names_path.exists() {
+                eprintln!("NCBI Taxonomy {}names.dmp file not found in {}", tax_prefix, ncbi_taxonomy_path.to_str().unwrap());
+                process::exit(1);
+            }
+
+            eprintln!("loading taxonomy");
+            let taxonomy = ncbitaxonomy::NcbiFileTaxonomy::from_ncbi_files(
+                nodes_path.as_path().to_str().unwrap(),
+                names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy");
+            eprintln!("taxonomy loaded");
+
             taxonomy.save_to_sqlite().expect("failed to save taxonomy database to SQLite");
         },
         _ => {
