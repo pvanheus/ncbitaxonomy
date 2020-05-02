@@ -1,7 +1,8 @@
 [package]
 name = "ncbitaxonomy"
 description = "Read NCBI Taxonomy Database from files and work with NCBI Taxonomy DB"
-version = "1.0.1"
+documentation = "https://docs.rs/ncbitaxonomy" # TODO: write better docs!!
+version = "1.0.2"
 authors = ["Peter van Heusden <pvh@sanbi.ac.za>"]
 license = "MIT"
 readme = "README.md"
