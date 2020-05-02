@@ -19,7 +19,7 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use seq_io::fastq::Record;
-use ncbitaxonomy::{NcbiTaxonomy, NcbiFileTaxonomy};
+use ncbitaxonomy::{NcbiTaxonomy, NcbiSqliteTaxonomy};
 
 enum FilterTool {
     Centrifuge,
@@ -33,24 +33,6 @@ impl fmt::Display for FilterTool {
             FilterTool::Kraken2 => write!(f, "FilterTool::Kraken2")
         }
     }
-}
-
-fn read_taxonomy(tax_prefix: &str, ncbi_taxonomy_path: &Path) -> NcbiFileTaxonomy {
-    let nodes_path = ncbi_taxonomy_path.join(tax_prefix.to_owned() + "nodes.dmp");
-    if !nodes_path.exists() {
-        eprintln!("NCBI Taxonomy {}nodes.dmp file not found in {}", tax_prefix, ncbi_taxonomy_path.to_str().unwrap());
-        process::exit(1);
-    }
-
-    let names_path = ncbi_taxonomy_path.join(tax_prefix.to_owned() + "names.dmp");
-    if !names_path.exists() {
-        eprintln!("NCBI Taxonomy {}names.dmp file not found in {}", tax_prefix, ncbi_taxonomy_path.to_str().unwrap());
-        process::exit(1);
-    }
-
-    ncbitaxonomy::NcbiFileTaxonomy::from_ncbi_files(
-        nodes_path.as_path().to_str().unwrap(),
-        names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy")
 }
 
 fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
@@ -162,12 +144,12 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
 }
 
 pub fn main() {
-    let matches = clap_app!(taxonomy_filter_refseq =>
+    // TODO: write test suite
+    let matches = clap_app!(taxonomy_filter_fastq =>
         (version: ncbitaxonomy::VERSION)
         (author: "Peter van Heusden <pvh@sanbi.axc.za>")
-        (about: "Filter NCBI RefSeq FASTA files by taxonomic lineage")
-        (@arg TAXONOMY_FILENAME_PREFIX: -t --tax_prefix +takes_value "String to prepend to names of nodes.dmp and names.dmp")
-        (@arg TAXONOMY_DIR: -T --taxdir +takes_value +required "Directory containing the NCBI taxonomy nodes.dmp and names.dmp files")
+        (about: "Filter FASTQ files whose reads have been classified by Centrifuge or Kraken2, only retaining reads in taxa descending from given ancestor")
+        (@arg TAXDB_URL: -d --db +takes_value "URL for SQLite taxonomy database")
         (@arg ANCESTOR_ID: -A --ancestor_taxid +takes_value +required "Name of ancestor to use as ancestor filter")
         (@group filter_tool +required =>
             (@arg centrifuge: -C --centrifuge !required "Filter using report from Centrifuge")
@@ -177,13 +159,6 @@ pub fn main() {
         (@arg TAXONOMY_REPORT_FILENAME: -F --tax_report_filename +takes_value  +required "Output from Kraken2 (default) or Centrifuge")
         (@arg INPUT_FASTQ: ... +required "FASTA file with RefSeq sequences")
         ).get_matches();
-
-    let tax_prefix = match matches.value_of("TAXONOMY_FILENAME_PREFIX") {
-        Some(name) => name,
-        None => ""
-    }.to_string();
-
-    let ncbi_taxonomy_path = Path::new(matches.value_of("TAXONOMY_DIR").unwrap());
 
     let output_dir = match matches.value_of("OUTPUT_DIR") {
         Some(path) => Path::new(path),
@@ -202,7 +177,9 @@ pub fn main() {
 
     let tax_report_filename = matches.value_of("TAXONOMY_REPORT_FILENAME").unwrap();
 
-    let taxonomy = read_taxonomy(&tax_prefix, ncbi_taxonomy_path);
+    let taxdb_url = if matches.is_present("TAXDB_URL") { Some(matches.value_of("TAXDB_URL").unwrap()) } else { None };
+
+    let taxonomy = NcbiSqliteTaxonomy::new(taxdb_url);
     if !taxonomy.contains_id(ancestor_id) {
         eprintln!("Taxonomy does not contain an ancestor with taxid {}", ancestor_id);
         process::exit(1);

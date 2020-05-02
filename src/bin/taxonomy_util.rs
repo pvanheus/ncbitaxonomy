@@ -8,8 +8,8 @@ use ncbitaxonomy::{NcbiTaxonomy, NcbiSqliteTaxonomy};
 
 fn common_ancestor_distance(taxonomy: &dyn NcbiTaxonomy, name1: &str, name2: &str, only_canonical: bool) {
     match taxonomy.get_distance_to_common_ancestor(name1, name2, only_canonical) {
-        Some(distance) => {
-            println!("{}", distance);
+        Some((distance, common_ancestor_name)) => {
+            println!("{}\t{}", distance, common_ancestor_name);
         },
         None => {
             eprintln!("no common ancestor found");
@@ -19,7 +19,9 @@ fn common_ancestor_distance(taxonomy: &dyn NcbiTaxonomy, name1: &str, name2: &st
 }
 
 pub fn main() {
-    let app_m = clap_app!(taxonomy_filter_refseq =>
+    // TODO:
+    // * write get_lineage - print lineage of taxon
+    let app_m = clap_app!(taxonomy_util =>
         (version: ncbitaxonomy::VERSION)
         (author: "Peter van Heusden <pvh@sanbi.axc.za>")
         (about: "Utilities for working with the NCBI taxonomy database")
@@ -30,16 +32,21 @@ pub fn main() {
             (@arg NAME1: +required "Name of first taxon")
             (@arg NAME2: +required "Name of second taxon")
         )
-        (@subcommand find_id =>
+        (@subcommand get_id =>
             (about: "find taxonomy ID for name")
             (@arg NAME: +required "Name of taxon")
         )
-        (@subcommand find_name =>
+        (@subcommand get_name =>
             (about: "find name for taxonomy ID")
             (@arg ID: +required "Taxonomy ID to look up")
         )
-        (@subcommand sqlite =>
-            (about: "sqlite testing")
+        (@subcommand get_lineage =>
+            (about: "get lineage for name [unimplemented]")
+            (@arg DELIMITER: --delimiter -D +takes_value "Delimiter for lineage string")
+            (@arg NAME: +required "Name of taxon")
+        )
+        (@subcommand to_sqlite =>
+            (about: "save taxonomy database loaded from files to SQLite database file")
             (@arg TAXONOMY_FILENAME_PREFIX: -t --tax_prefix +takes_value "String to prepend to names of nodes.dmp and names.dmp")
             (@arg TAXONOMY_DIR: "Directory containing the NCBI taxonomy nodes.dmp and names.dmp files")
         )
@@ -56,20 +63,25 @@ pub fn main() {
             let name2 = sub_m.value_of("NAME2").unwrap();
             common_ancestor_distance(&taxonomy, name1, name2, only_canonical);
         },
-        ("find_id", Some(sub_m)) => {
+        ("get_id", Some(sub_m)) => {
             let name = sub_m.value_of("NAME").unwrap();
             match taxonomy.get_id_by_name(name) {
                 Some(val) => println!("{}", val),
                 None => eprintln!("name {} not found in taxomomy", name)
             }
         },
-        ("find_name", Some(sub_m)) => {
+        ("get_name", Some(sub_m)) => {
             let taxid = (sub_m.value_of("ID").unwrap()).parse::<i32>().unwrap();
             match taxonomy.get_name_by_id(taxid) {
                 Some(val) => println!("{}", val),
                 None => eprintln!("id {} not found in taxonomy", taxid)
             }
         },
+        ("get_lineage", Some(sub_m)) => {
+            let _ = sub_m.value_of("DELIMITER").unwrap_or(";");
+            let _ = sub_m.value_of("NAME").unwrap();
+            // TODO: implement here (depends on expanding NcbiTaxonomy method signature
+        }
         ("to_sqlite", Some(sub_m)) => {
             let ncbi_taxonomy_path = Path::new(sub_m.value_of("TAXONOMY_DIR").unwrap());
 
@@ -96,7 +108,7 @@ pub fn main() {
                 names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy");
             eprintln!("taxonomy loaded");
 
-            taxonomy.save_to_sqlite().expect("failed to save taxonomy database to SQLite");
+            taxonomy.save_to_sqlite(taxdb_url).expect("failed to save taxonomy database to SQLite");
         },
         _ => {
             eprintln!("Unknown subcommand");

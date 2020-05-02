@@ -1,7 +1,7 @@
 [package]
 name = "ncbitaxonomy"
 description = "Read NCBI Taxonomy Database from files and work with NCBI Taxonomy DB"
-version = "0.3.0"
+version = "1.0.0"
 authors = ["Peter van Heusden <pvh@sanbi.ac.za>"]
 license = "MIT"
 

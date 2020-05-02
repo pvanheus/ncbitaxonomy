@@ -44,10 +44,14 @@ use diesel::expression::dsl::count;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn establish_connection() -> SqliteConnection {
+fn establish_connection(db_url: Option<&str>) -> SqliteConnection {
     dotenv().ok();
 
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let database_url = match db_url {
+        Some(val) => val.to_owned(),
+        None => env::var("DATABASE_URL").expect("DATABASE_URL must be set")
+    };
+
     SqliteConnection::establish(&database_url)
         .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }
@@ -64,8 +68,8 @@ pub trait NcbiTaxonomy {
     fn is_descendant_taxid(&self, taxid: i32, ancestor_taxid: i32) -> bool;
     fn get_name_by_id(&self, taxid: i32) -> Option<String>;
     fn get_id_by_name(&self, name: &str) -> Option<i32>;
-    fn get_distance_to_common_ancestor_taxid(&self, taxid1: i32, taxid2: i32, only_canonical: bool) -> Option<i32>;
-    fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str, only_canonical: bool) -> Option<i32>;
+    fn get_distance_to_common_ancestor_taxid(&self, taxid1: i32, taxid2: i32, only_canonical: bool) -> Option<(i32, i32)>;
+    fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str, only_canonical: bool) -> Option<(i32, String)>;
 }
 
 #[derive(Debug)]
@@ -155,11 +159,11 @@ impl NcbiFileTaxonomy {
         Ok(tree)
     }
 
-    pub fn save_to_sqlite(&self) -> Result<(), DieselError> {
+    pub fn save_to_sqlite(&self, db_url: Option<&str>) -> Result<SqliteConnection, DieselError> {
         // design of storing a tree in a relational DB inspired by:
         // https://makandracards.com/makandra/45275-storing-trees-in-databases
         use schema::taxonomy;
-        let connection = establish_connection();
+        let connection = establish_connection(db_url);
 
         connection.transaction::<_, DieselError, _>(|| {
             for (id, nodeid) in self.id_to_node.iter() {
@@ -186,7 +190,7 @@ impl NcbiFileTaxonomy {
             }
             Ok(())
         })?;
-        Ok(())
+        Ok(connection)
     }
 
     /// get_node_by_id
@@ -215,8 +219,6 @@ impl NcbiFileTaxonomy {
             None => None
         }
     }
-
-    // TODO write tests for get_distance_to_common_ancestor and get_distance_to_common_ancestor_id
 }
 
 impl NcbiTaxonomy for NcbiFileTaxonomy {
@@ -289,10 +291,10 @@ impl NcbiTaxonomy for NcbiFileTaxonomy {
     /// get_distance_to_common_ancestor_id
     ///
     /// get the distance (in steps in the tree) between taxid1 and the common ancestor with taxid2
-    fn get_distance_to_common_ancestor_taxid(&self, taxid1: i32, taxid2: i32, only_canonical: bool) -> Option<i32> {
+    fn get_distance_to_common_ancestor_taxid(&self, taxid1: i32, taxid2: i32, only_canonical: bool) -> Option<(i32, i32)> {
         let canonical_ranks = get_canonical_ranks();
         if taxid1 == taxid2 {
-            return Some(0)
+            return Some((0, taxid1))
         }
 
         let taxon1 = self.id_to_node.get(&taxid1)?;
@@ -312,10 +314,12 @@ impl NcbiTaxonomy for NcbiFileTaxonomy {
         for node in taxon1.ancestors(&self.arena) {
             let nodeid = self.get_id_by_node(node)?;
             let rank = self.id_to_rank.get(&nodeid)?;
+
             if !only_canonical || canonical_ranks.contains(rank) {
                 current_distance += 1;
                 if nodeid == taxid2 {
-                    return Some(current_distance)
+                    // taxid2 is an ancestor of taxid1
+                    return Some((current_distance, taxid2))
                 }
                 ancestors_distance1.insert(nodeid, current_distance);
             }
@@ -332,7 +336,7 @@ impl NcbiTaxonomy for NcbiFileTaxonomy {
                 if ancestors_distance1.contains_key(&nodeid) {
                     // the distance to te common ancestor is the distance from taxon2
                     // to an ancestor that is also an ancestor to taxon1
-                    return Some(current_distance)
+                    return Some((current_distance, nodeid))
                 }
             }
         }
@@ -342,13 +346,16 @@ impl NcbiTaxonomy for NcbiFileTaxonomy {
     /// get_distance_to_common_ancestor
     ///
     /// find the distance in the tree between name1 and name2
-    fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str, only_canonical: bool) -> Option<i32> {
+    fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str, only_canonical: bool) -> Option<(i32, String)> {
         let taxon1 = self.name_to_node.get(name1)?;
 
         let taxon2 = self.name_to_node.get(name2)?;
 
-        self.get_distance_to_common_ancestor_taxid(self.get_id_by_node(*taxon1).unwrap(),
-                                                   self.get_id_by_node(*taxon2).unwrap(), only_canonical)
+        match self.get_distance_to_common_ancestor_taxid(self.get_id_by_node(*taxon1).unwrap(),
+                                                   self.get_id_by_node(*taxon2).unwrap(), only_canonical) {
+            Some((distance, taxid)) => Some((distance, self.get_name_by_id(taxid).unwrap())),
+            None => None
+        }
     }
 }
 
@@ -358,14 +365,14 @@ pub struct NcbiSqliteTaxonomy {
 
 impl NcbiSqliteTaxonomy {
     pub fn new(db_url: Option<&str>) -> Self {
-        dotenv().ok();
-
-        let database_url = match db_url {
-            Some(database_url) => database_url.to_string(),
-            None => env::var("DATABASE_URL").expect("DATABASE_URL must be set")
-        };
         NcbiSqliteTaxonomy {
-            connection: SqliteConnection::establish(&database_url).unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
+            connection: establish_connection(db_url)
+        }
+    }
+
+    pub fn from_connection(connection: SqliteConnection) -> Self {
+        NcbiSqliteTaxonomy {
+            connection
         }
     }
 
@@ -502,12 +509,12 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
         }
     }
 
-    fn get_distance_to_common_ancestor_taxid(&self, taxid1: i32, taxid2: i32, only_canonical: bool) -> Option<i32> {
+    fn get_distance_to_common_ancestor_taxid(&self, taxid1: i32, taxid2: i32, only_canonical: bool) -> Option<(i32, i32)> {
         // canonical ranks (+ superkingdom) as they appear in the NCBI taxonomy database
         let canonical_ranks = get_canonical_ranks();
 
         if taxid1 == taxid2 {
-            return Some(0)
+            return Some((0, taxid1))
         }
 
         let mut ancestors_distance1 = HashMap::new();
@@ -521,9 +528,9 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
         for taxid in self.get_ancestors(taxid1) {
             let current_rank = self.get_rank(taxid)?;
             if taxid == taxid2 {
-                return Some(current_distance)
+                return Some((current_distance, taxid2))
             }
-            if only_canonical || canonical_ranks.contains(&current_rank) {
+            if !only_canonical || canonical_ranks.contains(&current_rank) {
                 current_distance += 1;
                 ancestors_distance1.insert(taxid, current_distance);
             }
@@ -532,18 +539,17 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
         current_distance = 0;
         for taxid in self.get_ancestors(taxid2) {
             let current_rank = self.get_rank(taxid)?;
-            eprintln!("{}", self.get_name_by_id(taxid).unwrap());
             if !only_canonical || canonical_ranks.contains(&current_rank) {
                 current_distance += 1;
                 if ancestors_distance1.contains_key(&taxid) {
-                    return Some(current_distance)
+                    return Some((current_distance, taxid))
                 }
             }
         }
         None
     }
 
-    fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str, only_canonical: bool) -> Option<i32> {
+    fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str, only_canonical: bool) -> Option<(i32, String)> {
         let taxid1 = match self.get_id_by_name(name1) {
             Some(val) => val,
             None => return None
@@ -554,7 +560,10 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
             None => return None
         };
 
-        self.get_distance_to_common_ancestor_taxid(taxid1, taxid2, only_canonical)
+        match self.get_distance_to_common_ancestor_taxid(taxid1, taxid2, only_canonical) {
+            Some((distance, taxid)) => Some((distance, self.get_name_by_id(taxid).unwrap())),
+            None => None
+        }
     }
 }
 
@@ -577,8 +586,6 @@ mod tests {
         pub taxonomy: NcbiSqliteTaxonomy,
     }
 
-
-    // TODO: built this in memory on the fly
     impl Default for NcbiSqliteTaxonomyFixture {
         fn default() -> Self {
             let tree = NcbiSqliteTaxonomy::new(Some("data/ncbi_taxonomy.sqlite"));
@@ -681,5 +688,57 @@ mod tests {
     fn sqlite_taxid_descendants() {
         let fixture = NcbiSqliteTaxonomyFixture::default();
         assert!(fixture.taxonomy.is_descendant_taxid(504556, 12333));
+    }
+
+    #[test]
+    fn distance_to_common_ancestor_taxid() {
+        let fixture = NcbiFileTaxonomyFixture::default();
+        assert_eq!(fixture.taxonomy.get_distance_to_common_ancestor_taxid(156615, 12340, false), Some((2, 12333)));
+    }
+
+    #[test]
+    fn distance_to_common_ancestor_taxid_canonical() {
+        let fixture = NcbiFileTaxonomyFixture::default();
+        assert_eq!(fixture.taxonomy.get_distance_to_common_ancestor_taxid(156615, 12340, true), Some((2, 10239)));
+    }
+
+    #[test]
+    fn distance_to_common_ancestor() {
+        let fixture = NcbiFileTaxonomyFixture::default();
+        assert_eq!(fixture.taxonomy.get_distance_to_common_ancestor("Cyanophage clone GS2601", "Enterobacteria phage 933J", false),
+                   Some((2, "unclassified bacterial viruses".to_string())));
+    }
+
+    #[test]
+    fn distance_to_common_ancestor_canonical() {
+        let fixture = NcbiFileTaxonomyFixture::default();
+        assert_eq!(fixture.taxonomy.get_distance_to_common_ancestor("Cyanophage clone GS2601", "Enterobacteria phage 933J", true),
+                   Some((2, "Viruses".to_string())));
+    }
+
+    #[test]
+    fn sqlite_distance_to_common_ancestor_taxid() {
+        let fixture = NcbiSqliteTaxonomyFixture::default();
+        assert_eq!(fixture.taxonomy.get_distance_to_common_ancestor_taxid(156615, 12340, false), Some((2, 12333)));
+    }
+
+    #[test]
+    fn sqlite_distance_to_common_ancestor_taxid_canonical() {
+        let fixture = NcbiSqliteTaxonomyFixture::default();
+        assert_eq!(fixture.taxonomy.get_distance_to_common_ancestor_taxid(156615, 12340, true), Some((2, 10239)));
+    }
+
+    #[test]
+    fn sqlite_distance_to_common_ancestor() {
+        let fixture = NcbiSqliteTaxonomyFixture::default();
+        assert_eq!(fixture.taxonomy.get_distance_to_common_ancestor("Cyanophage clone GS2601", "Enterobacteria phage 933J", false),
+                   Some((2, "unclassified bacterial viruses".to_string())));
+    }
+
+    #[test]
+    fn sqlite_distance_to_common_ancestor_canonical() {
+        let fixture = NcbiSqliteTaxonomyFixture::default();
+        assert_eq!(fixture.taxonomy.get_distance_to_common_ancestor("Cyanophage clone GS2601", "Enterobacteria phage 933J", true),
+                   Some((2, "Viruses".to_string())));
     }
 }
