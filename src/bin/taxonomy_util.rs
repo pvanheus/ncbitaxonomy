@@ -48,7 +48,7 @@ pub fn main() {
         (@subcommand to_sqlite =>
             (about: "save taxonomy database loaded from files to SQLite database file")
             (@arg TAXONOMY_FILENAME_PREFIX: -t --tax_prefix +takes_value "String to prepend to names of nodes.dmp and names.dmp")
-            (@arg TAXONOMY_DIR: "Directory containing the NCBI taxonomy nodes.dmp and names.dmp files")
+            (@arg TAXONOMY_DIR: +required "Directory containing the NCBI taxonomy nodes.dmp and names.dmp files")
         )
     ).get_matches();
 

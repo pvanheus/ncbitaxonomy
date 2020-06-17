@@ -2,7 +2,7 @@
 name = "ncbitaxonomy"
 description = "Read NCBI Taxonomy Database from files and work with NCBI Taxonomy DB"
 documentation = "https://docs.rs/ncbitaxonomy" # TODO: write better docs!!
-version = "1.0.3"
+version = "1.0.4"
 authors = ["Peter van Heusden <pvh@sanbi.ac.za>"]
 license = "MIT"
 readme = "README.md"
@@ -22,4 +22,5 @@ clap = "~2.32"
 seq_io = "~0.3"
 flate2 = "~1"
 diesel = { version = "~1", features = ["sqlite"] }
+diesel_migrations = "~1.4"
 dotenv = "~0.9"

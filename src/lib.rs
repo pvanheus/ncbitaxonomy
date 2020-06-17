@@ -1,6 +1,8 @@
 #![recursion_limit = "1024"]
 #[macro_use]
 extern crate diesel;
+#[macro_use]
+extern crate diesel_migrations;
 extern crate dotenv;
 extern crate thiserror;
 extern crate indextree;
@@ -15,12 +17,22 @@ use std::io;
 
 #[derive(Error, Debug)]
 pub enum NcbiTaxonomyError {
-    #[error("I/O error opening or reading file")]
+    #[error(transparent)]
     Io(#[from] io::Error),
     #[error("format error in nodes.dmp in line {0}")]
     NodeFileFormatError(String),
-    #[error("failed to parse integer from string {0}")]
+    #[error(transparent)]
     ParseIntError(#[from] ::std::num::ParseIntError)
+}
+
+#[derive(Error, Debug)]
+pub enum ToSqliteError {
+    #[error(transparent)]
+    Diesel(#[from] diesel::result::Error),
+    #[error(transparent)]
+    MigrationError(#[from] diesel_migrations::RunMigrationsError),
+    #[error("Error looking up id {0}")]
+    IdLookupError(String)
 }
 
 use std::collections::{HashMap, HashSet};
@@ -34,7 +46,6 @@ pub mod models;
 pub mod schema;
 
 use diesel::prelude::*;
-use diesel::result::Error as DieselError;
 use diesel::sqlite::SqliteConnection;
 use dotenv::dotenv;
 use std::env;
@@ -105,8 +116,8 @@ impl NcbiFileTaxonomy {
             let id_str = fields.next().ok_or_else(|| NcbiTaxonomyError::NodeFileFormatError(line.clone()))?;
             let parent_id_str = fields.next().ok_or_else(|| NcbiTaxonomyError::NodeFileFormatError(line.clone()))?;
             let rank = fields.next().ok_or_else(|| NcbiTaxonomyError::NodeFileFormatError(line.clone()))?.to_string();
-            let id = id_str.parse::<i32>().or_else(|e| Err(NcbiTaxonomyError::ParseIntError(e)))?;
-            let parent_id = parent_id_str.parse::<i32>().or_else(|e| Err(NcbiTaxonomyError::ParseIntError(e)))?;
+            let id = id_str.parse::<i32>()?;
+            let parent_id = parent_id_str.parse::<i32>()?;
             id_to_rank.insert(id, rank);
             if parent_id != id {  // this happens for the root node
                 // thanks to https://stackoverflow.com/questions/33243784/append-to-vector-as-value-of-hashmap/33243862
@@ -159,18 +170,25 @@ impl NcbiFileTaxonomy {
         Ok(tree)
     }
 
-    pub fn save_to_sqlite(&self, db_url: Option<&str>) -> Result<SqliteConnection, DieselError> {
+    pub fn save_to_sqlite(&self, db_url: Option<&str>) -> Result<SqliteConnection, ToSqliteError> {
         // design of storing a tree in a relational DB inspired by:
         // https://makandracards.com/makandra/45275-storing-trees-in-databases
         use schema::taxonomy;
         let connection = establish_connection(db_url);
 
-        connection.transaction::<_, DieselError, _>(|| {
+        embed_migrations!();
+        embedded_migrations::run(&connection)?;
+
+        connection.transaction::<_, ToSqliteError, _>(|| {
             for (id, nodeid) in self.id_to_node.iter() {
                 let mut ancestors_vec = nodeid.ancestors(&self.arena).map(|nodeid| self.get_id_by_node(nodeid).unwrap().to_string()).collect::<Vec<String>>();
                 ancestors_vec.reverse();
                 let ancestors_string = ancestors_vec.join("/");
-                let name = self.id_to_name.get(id).unwrap();
+                let name = match self.id_to_name.get(id) {
+                    Some(val) => val,
+                    None => { return Err(ToSqliteError::IdLookupError(id.to_string())) }
+                };
+
                 let taxon_record = NewTaxon {
                     id,
                     ancestry: match ancestors_string  {
