@@ -22,5 +22,5 @@ clap = "~2.32"
 seq_io = "~0.3"
 flate2 = "~1"
 diesel = { version = "~1", features = ["sqlite"] }
-diesel_migrations = "~1.4"
+diesel_migrations = { version = "~1", features = ["sqlite"] }
 dotenv = "~0.9"
