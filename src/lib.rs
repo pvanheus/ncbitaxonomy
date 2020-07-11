@@ -79,6 +79,7 @@ pub trait NcbiTaxonomy {
     fn is_descendant_taxid(&self, taxid: i32, ancestor_taxid: i32) -> bool;
     fn get_name_by_id(&self, taxid: i32) -> Option<String>;
     fn get_id_by_name(&self, name: &str) -> Option<i32>;
+    fn get_lineage(&self, name: &str) -> Option<Vec<i32>>;
     fn get_distance_to_common_ancestor_taxid(&self, taxid1: i32, taxid2: i32, only_canonical: bool) -> Option<(i32, i32)>;
     fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str, only_canonical: bool) -> Option<(i32, String)>;
 }
@@ -306,6 +307,18 @@ impl NcbiTaxonomy for NcbiFileTaxonomy {
         }
     }
 
+    /// get_lineage
+    ///
+    /// get the list of IDs of a taxon and its parents (up to the root)
+    fn get_lineage(&self, name: &str) -> Option<Vec<i32>> {
+        let node_id = match self.name_to_node.get(name)  {
+            Some(val) => val,
+            None => return None
+        };
+
+        Some(node_id.ancestors(&self.arena).map(|node_id| *(&self.get_id_by_node(node_id).unwrap())).collect())
+    }
+
     /// get_distance_to_common_ancestor_id
     ///
     /// get the distance (in steps in the tree) between taxid1 and the common ancestor with taxid2
@@ -525,6 +538,14 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
             1 => Some(results[0]),
             _ => None
         }
+    }
+
+    fn get_lineage(&self, name: &str) -> Option<Vec<i32>> {
+        let tax_id = match self.get_id_by_name(name)  {
+            Some(val) => val,
+            None => return None
+        };
+        Some(self.get_ancestors(tax_id))
     }
 
     fn get_distance_to_common_ancestor_taxid(&self, taxid1: i32, taxid2: i32, only_canonical: bool) -> Option<(i32, i32)> {

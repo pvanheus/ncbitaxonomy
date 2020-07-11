@@ -42,6 +42,7 @@ pub fn main() {
         )
         (@subcommand get_lineage =>
             (about: "get lineage for name [unimplemented]")
+            (@arg SHOW_NAMES: --show_names -S "Show taxon names, not just IDs")
             (@arg DELIMITER: --delimiter -D +takes_value "Delimiter for lineage string")
             (@arg NAME: +required "Name of taxon")
         )
@@ -78,9 +79,22 @@ pub fn main() {
             }
         },
         ("get_lineage", Some(sub_m)) => {
-            let _ = sub_m.value_of("DELIMITER").unwrap_or(";");
-            let _ = sub_m.value_of("NAME").unwrap();
-            // TODO: implement here (depends on expanding NcbiTaxonomy method signature
+            let show_names = sub_m.is_present("SHOW_NAMES");
+            let delimiter = sub_m.value_of("DELIMITER").unwrap_or(";");
+            let name = sub_m.value_of("NAME").unwrap();
+
+            match taxonomy.get_lineage(name) {
+                None => eprintln!("{} not found in taxonomy", name),
+                Some(lineage) => {
+                    let output_list: Vec<String> = lineage.iter().map(|id| {
+                        match show_names {
+                            false => id.to_string(),
+                            true => taxonomy.get_name_by_id(*id).unwrap() + " (" + id.to_string().as_str() + ")"
+                        }
+                    }).collect();
+                    println!("{}", output_list.join(delimiter));
+                }
+            }
         }
         ("to_sqlite", Some(sub_m)) => {
             let ncbi_taxonomy_path = Path::new(sub_m.value_of("TAXONOMY_DIR").unwrap());
