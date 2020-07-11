@@ -19,8 +19,6 @@ fn common_ancestor_distance(taxonomy: &dyn NcbiTaxonomy, name1: &str, name2: &st
 }
 
 pub fn main() {
-    // TODO:
-    // * write get_lineage - print lineage of taxon
     let app_m = clap_app!(taxonomy_util =>
         (version: ncbitaxonomy::VERSION)
         (author: "Peter van Heusden <pvh@sanbi.axc.za>")
