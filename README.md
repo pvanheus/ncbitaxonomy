@@ -96,7 +96,7 @@ OPTIONS:
 SUBCOMMANDS:
     common_ancestor_distance    find the tree distance to te common ancestor between two taxa
     get_id                      find taxonomy ID for name
-    get_lineage                 get lineage for name [unimplemented]
+    get_lineage                 get lineage for name
     get_name                    find name for taxonomy ID
     help                        Prints this message or the help of the given subcommand(s)
     to_sqlite                   save taxonomy database loaded from files to SQLite database file

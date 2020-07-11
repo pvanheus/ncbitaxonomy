@@ -41,7 +41,7 @@ pub fn main() {
             (@arg ID: +required "Taxonomy ID to look up")
         )
         (@subcommand get_lineage =>
-            (about: "get lineage for name [unimplemented]")
+            (about: "get lineage for name")
             (@arg SHOW_NAMES: --show_names -S "Show taxon names, not just IDs")
             (@arg DELIMITER: --delimiter -D +takes_value "Delimiter for lineage string")
             (@arg NAME: +required "Name of taxon")
