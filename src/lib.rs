@@ -687,6 +687,18 @@ mod tests {
     }
 
     #[test]
+    fn get_lineage() {
+        let fixture = NcbiFileTaxonomyFixture::default();
+        assert_eq!(fixture.taxonomy.get_lineage("Streptococcus phage 9429.1"), Some(vec![370556,387088,12333,10239,1]));
+    }
+
+    #[test]
+    fn get_lineage_sqlite() {
+        let fixture = NcbiSqliteTaxonomyFixture::default();
+        assert_eq!(fixture.taxonomy.get_lineage("Streptococcus phage 9429.1"), Some(vec![370556,387088,12333,10239,1]));
+    }
+
+    #[test]
     fn traversal() {
         let fixture = NcbiFileTaxonomyFixture::default();
         let traversal = fixture.taxonomy.traversal(12333);
