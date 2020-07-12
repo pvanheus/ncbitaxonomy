@@ -5,6 +5,7 @@ extern crate ncbitaxonomy;
 use std::path::Path;
 use std::process;
 use ncbitaxonomy::{NcbiTaxonomy, NcbiSqliteTaxonomy};
+use std::process::exit;
 
 fn common_ancestor_distance(taxonomy: &dyn NcbiTaxonomy, name1: &str, name2: &str, only_canonical: bool) {
     match taxonomy.get_distance_to_common_ancestor(name1, name2, only_canonical) {
@@ -23,7 +24,7 @@ pub fn main() {
         (version: ncbitaxonomy::VERSION)
         (author: "Peter van Heusden <pvh@sanbi.axc.za>")
         (about: "Utilities for working with the NCBI taxonomy database")
-        (@arg TAXDB_URL: -d --db +takes_value "URL for SQLite taxonomy database")
+        (@arg TAXDB_URL: -d --db +takes_value +required "URL for SQLite taxonomy database")
         (@subcommand common_ancestor_distance =>
             (about: "find the tree distance to te common ancestor between two taxa")
             (@arg CANONICAL: --only_canonical "Only consider canonical taxonomic ranks")
@@ -51,9 +52,20 @@ pub fn main() {
         )
     ).get_matches();
 
-    let taxdb_url = if app_m.is_present("TAXDB_URL") { Some(app_m.value_of("TAXDB_URL").unwrap()) } else { None };
+    let taxdb_url= app_m.value_of("TAXDB_URL").unwrap();
+    // sqlite URLs are filename paths (the :memory: URL does not make sense for this application)
+    match app_m.subcommand_name() {
+        Some("to_sqlite") => {}, // valid to have a nonexistent database here, we will write to it
+        _ => {
+            let db_path = Path::new(taxdb_url);
+            if ! db_path.exists() {
+                eprintln!("No database found at {}", taxdb_url);
+                exit(1);
+            }
+        }
+    }
 
-    let taxonomy = NcbiSqliteTaxonomy::new(taxdb_url);
+    let taxonomy = NcbiSqliteTaxonomy::new(Some(taxdb_url));
 
     match app_m.subcommand() {
         ("common_ancestor_distance", Some(sub_m)) => {
@@ -66,7 +78,7 @@ pub fn main() {
             let name = sub_m.value_of("NAME").unwrap();
             match taxonomy.get_id_by_name(name) {
                 Some(val) => println!("{}", val),
-                None => eprintln!("name {} not found in taxomomy", name)
+                None => eprintln!("name {} not found in taxonomy", name)
             }
         },
         ("get_name", Some(sub_m)) => {
@@ -120,7 +132,7 @@ pub fn main() {
                 names_path.as_path().to_str().unwrap()).expect("Failed to load NCBI Taxonomy");
             eprintln!("taxonomy loaded");
 
-            taxonomy.save_to_sqlite(taxdb_url).expect("failed to save taxonomy database to SQLite");
+            taxonomy.save_to_sqlite(Some(taxdb_url)).expect("failed to save taxonomy database to SQLite");
         },
         _ => {
             eprintln!("Unknown subcommand");
