@@ -1,6 +1,3 @@
-#[macro_use]
-extern crate clap;
-
 extern crate bio;
 extern crate flate2;
 extern crate seq_io;
@@ -18,6 +15,7 @@ use std::collections::HashMap;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use clap::{Arg, ArgGroup, Command};
 use seq_io::fastq::Record;
 use ncbitaxonomy::{NcbiTaxonomy, NcbiSqliteTaxonomy};
 
@@ -41,7 +39,7 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
     if !output_dir.exists() {
         create_dir(output_dir).unwrap_or_else(|_| panic!("Failed to create output dir {}", output_dir.display()));
     }
-    let fastq_file = File::open(&fastq_filename).unwrap_or_else(|_| panic!("Failed to open input FASTQ file ({})", fastq_filename.display()));
+    let fastq_file = File::open(fastq_filename).unwrap_or_else(|_| panic!("Failed to open input FASTQ file ({})", fastq_filename.display()));
     let fastq_decoder: Box<dyn Read> = if fastq_filename.to_str().unwrap().ends_with(".gz") {
         Box::new(GzDecoder::new(fastq_file))
     } else {
@@ -123,7 +121,7 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
     let mut valid_records = 0;
     let mut total_records = 0;
     let filename_parts: Vec<&str>= fastq_filename.file_name().and_then(|s| s.to_str()).unwrap().split('.').collect();
-    let output_filename = output_dir.to_str().unwrap().to_owned() + "/" + &filename_parts[0].to_owned() + ".filtered." + &filename_parts[1..].join(".");
+    let output_filename = output_dir.to_str().unwrap().to_owned() + "/" + filename_parts[0] + ".filtered." + &filename_parts[1..].join(".");
     let output_file = File::create(&output_filename).unwrap_or_else(|_| panic!("Failed to create output file: {}", output_filename));
     let output_encoder: Box<dyn Write> = if output_filename.ends_with(".gz") {
         Box::new(GzEncoder::new(output_file, Compression::default()))
@@ -145,39 +143,72 @@ fn filter_fastq(fastq_filename: &Path, tax_report_filename: &str,
 
 pub fn main() {
     // TODO: write test suite
-    let matches = clap_app!(taxonomy_filter_fastq =>
-        (version: ncbitaxonomy::VERSION)
-        (author: "Peter van Heusden <pvh@sanbi.axc.za>")
-        (about: "Filter FASTQ files whose reads have been classified by Centrifuge or Kraken2, only retaining reads in taxa descending from given ancestor")
-        (@arg TAXDB_URL: -d --db +takes_value "URL for SQLite taxonomy database")
-        (@arg ANCESTOR_ID: -A --ancestor_taxid +takes_value +required "Name of ancestor to use as ancestor filter")
-        (@group filter_tool +required =>
-            (@arg centrifuge: -C --centrifuge !required "Filter using report from Centrifuge")
-            (@arg kraken2: -K --kraken2 !required "Filter using report from Kraken2")
-        )
-        (@arg OUTPUT_DIR: -d --output_dir "Directory to deposited filtered output files in")
-        (@arg TAXONOMY_REPORT_FILENAME: -F --tax_report_filename +takes_value  +required "Output from Kraken2 (default) or Centrifuge")
-        (@arg INPUT_FASTQ: ... +required "FASTA file with RefSeq sequences")
-        ).get_matches();
+    let matches = Command::new("taxonomy_filter_fastq")
+        .version(ncbitaxonomy::VERSION)
+        .author("Peter van Heusden <pvh@sanbi.ac.za>")
+        .about("Filter FASTQ files whose reads have been classified by Centrifuge or Kraken2, only retaining reads in taxa descending from given ancestor")
+        .arg(Arg::new("TAXDB_URL")
+            .short('b')
+            .long("db")
+            .value_name("URL")
+            .help("URL for SQLite taxonomy database"))
+        .arg(Arg::new("ANCESTOR_ID")
+            .short('A')
+            .long("ancestor_taxid")
+            .value_name("TAXID")
+            .required(true)
+            .help("Taxonomy ID of ancestor to use as ancestor filter"))
+        .group(ArgGroup::new("filter_tool")
+            .arg("centrifuge")
+            .arg("kraken2")
+            .required(true))
+        .arg(Arg::new("centrifuge")
+            .short('C')
+            .long("centrifuge")
+            .action(clap::ArgAction::SetTrue)
+            .help("Filter using report from Centrifuge"))
+        .arg(Arg::new("kraken2")
+            .short('K')
+            .long("kraken2")
+            .action(clap::ArgAction::SetTrue)
+            .help("Filter using report from Kraken2"))
+        .arg(Arg::new("OUTPUT_DIR")
+            .short('o')
+            .long("output_dir")
+            .value_name("OUTDIR")
+            .help("Directory to deposit filtered output files in"))
+        .arg(Arg::new("TAXONOMY_REPORT_FILENAME")
+            .short('F')
+            .long("tax_report_filename")
+            .value_name("FILE")
+            .required(true)
+            .help("Output from Kraken2 (default) or Centrifuge"))
+        .arg(Arg::new("INPUT_FASTQ")
+            .value_name("FILE")
+            .num_args(1..)
+            .required(true)
+            .help("FASTQ file(s) with reads to filter"))
+        .get_matches();
 
-    let output_dir = match matches.value_of("OUTPUT_DIR") {
-        Some(path) => Path::new(path),
+    let output_dir_str = matches.get_one::<String>("OUTPUT_DIR");
+    let output_dir = match output_dir_str {
+        Some(path) => Path::new(path.as_str()),
         None => Path::new(".")
     };
 
-    let filter_tool = if matches.is_present("centrifuge") {
+    let filter_tool = if matches.get_flag("centrifuge") {
         FilterTool::Centrifuge
     } else {
         FilterTool::Kraken2  // default to kraken2
     };
     eprintln!("filter tool {}", filter_tool);
 
-    let ancestor_id_str = matches.value_of("ANCESTOR_ID").unwrap();
+    let ancestor_id_str = matches.get_one::<String>("ANCESTOR_ID").expect("ANCESTOR_ID is required");
     let ancestor_id = ancestor_id_str.parse::<i32>().unwrap_or_else(|_| panic!("Failed to interpret ({}) as a taxonomy ID", ancestor_id_str));
 
-    let tax_report_filename = matches.value_of("TAXONOMY_REPORT_FILENAME").unwrap();
+    let tax_report_filename = matches.get_one::<String>("TAXONOMY_REPORT_FILENAME").expect("TAXONOMY_REPORT_FILENAME is required");
 
-    let taxdb_url = if matches.is_present("TAXDB_URL") { Some(matches.value_of("TAXDB_URL").unwrap()) } else { None };
+    let taxdb_url = matches.get_one::<String>("TAXDB_URL").map(|s| s.as_str());
 
     let taxonomy = NcbiSqliteTaxonomy::new(taxdb_url);
     if !taxonomy.contains_id(ancestor_id) {
@@ -185,7 +216,10 @@ pub fn main() {
         process::exit(1);
     }
 
-    let input_files: Vec<&str> = matches.values_of("INPUT_FASTQ").unwrap().collect();
+    let input_files: Vec<&str> = matches.get_many::<String>("INPUT_FASTQ")
+        .expect("INPUT_FASTQ is required")
+        .map(|s| s.as_str())
+        .collect();
     for input_file in input_files.iter() {
         let input_file_path = Path::new(input_file);
         eprintln!("processing {}", input_file_path.file_name().and_then(|s| s.to_str()).unwrap());

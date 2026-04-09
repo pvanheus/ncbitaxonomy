@@ -2,7 +2,7 @@
 name = "ncbitaxonomy"
 description = "Read NCBI Taxonomy Database from files and work with NCBI Taxonomy DB"
 documentation = "https://docs.rs/ncbitaxonomy" # TODO: write better docs!!
-version = "1.0.7"
+version = "1.1.0"
 authors = ["Peter van Heusden <pvh@sanbi.ac.za>"]
 license = "MIT"
 readme = "README.md"
@@ -10,17 +10,18 @@ repository = "https://github.com/pvanheus/ncbitaxonomy"
 keywords = ["bioinformatics", "taxonomy"]
 categories = ["command-line-utilities", "parser-implementations", "science"]
 default-run = "taxonomy_util"
+edition = "2024"
 
 [badges]
 circle-ci = { repository = "pvanheus/ncbitaxonomy", branch = "master" }
 
 [dependencies]
-thiserror = "~1.0"
-indextree = "~3"
-bio = "~0.25"
-clap = "~2.32"
+thiserror = "~2"
+indextree = "~4"
+bio = "~3"
+clap = "~4"
 seq_io = "~0.3"
 flate2 = "~1"
-diesel = { version = "~1", features = ["sqlite"] }
-diesel_migrations = { version = "~1", features = ["sqlite"] }
-dotenv = "~0.9"
+diesel = { version = "~2", features = ["sqlite"] }
+diesel_migrations = { version = "~2", features = ["sqlite"] }
+dotenv = "~0.15"

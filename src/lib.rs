@@ -1,7 +1,9 @@
 #![recursion_limit = "1024"]
+
+//! ncbitaxonomy: a module for working with a local copy of the NCBI taxonomy database
+
 #[macro_use]
 extern crate diesel;
-#[macro_use]
 extern crate diesel_migrations;
 extern crate dotenv;
 extern crate thiserror;
@@ -10,10 +12,12 @@ extern crate core;
 extern crate seq_io;
 extern crate clap;
 
-/// ncbitaxonomy: a module for working with a local copy of the NCBI taxonomy database
-
 use thiserror::Error;
 use std::io;
+use std::cell::RefCell;
+use std::error::Error as StdError;
+
+type MigrationError = Box<dyn StdError + Send + Sync + 'static>;
 
 #[derive(Error, Debug)]
 pub enum NcbiTaxonomyError {
@@ -30,7 +34,7 @@ pub enum ToSqliteError {
     #[error(transparent)]
     Diesel(#[from] diesel::result::Error),
     #[error(transparent)]
-    MigrationError(#[from] diesel_migrations::RunMigrationsError),
+    MigrationError(#[from] MigrationError),
     #[error("Error looking up id {0}")]
     IdLookupError(String)
 }
@@ -47,13 +51,15 @@ pub mod schema;
 
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use dotenv::dotenv;
 use std::env;
 
 use self::models::*;
-use diesel::expression::dsl::count;
+use diesel::dsl::count;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
 fn establish_connection(db_url: Option<&str>) -> SqliteConnection {
     dotenv().ok();
@@ -69,7 +75,7 @@ fn establish_connection(db_url: Option<&str>) -> SqliteConnection {
 
 fn get_canonical_ranks() -> HashSet<String> {
     // canonical ranks (+ superkingdom) as they appear in the NCBI taxonomy database
-    HashSet::from_iter(vec!["superkingdom", "kingdom", "phylum", "class", "order", "family", "genus", "species"].iter().map(|x| (*x).to_string()))
+    HashSet::from_iter(["superkingdom", "kingdom", "phylum", "class", "order", "family", "genus", "species"].iter().map(|x| (*x).to_string()))
 }
 
 pub trait NcbiTaxonomy {
@@ -123,12 +129,12 @@ impl NcbiFileTaxonomy {
             if parent_id != id {  // this happens for the root node
                 // thanks to https://stackoverflow.com/questions/33243784/append-to-vector-as-value-of-hashmap/33243862
                 // for this way to get the existing entry or insert an empty list.
-                child_ids_by_parent_id.entry(parent_id).or_insert_with(Vec::new).push(id);
+                child_ids_by_parent_id.entry(parent_id).or_default().push(id);
             }
         }
 
         let mut keys = child_ids_by_parent_id.keys().collect::<Vec<&i32>>();
-        keys.sort_unstable_by(|a, b| a.cmp(b));
+        keys.sort_unstable();
 
         let mut arena: Arena<i32> = Arena::new();
 
@@ -139,14 +145,14 @@ impl NcbiFileTaxonomy {
                 None => arena.new_node(*id),
             };
             id_to_node.insert(*id, node_id);
-            for child in child_ids_by_parent_id.get(&id).expect("ID not found in child_ids_by_parent_id") {
+            for child in child_ids_by_parent_id.get(id).expect("ID not found in child_ids_by_parent_id") {
                 let child_node_id = match id_to_node.get(child) {
                     Some(child_node_id) => *child_node_id,
                     None => arena.new_node(*child),
                 };
                 id_to_node.insert(*child, child_node_id);
                 assert_ne!(node_id, child_node_id, "child node id same as node: {} (for {} {})", node_id, *id, *child);
-                node_id.append(child_node_id, &mut arena).unwrap();  // might return Failure, in which case we panic!
+                node_id.append(child_node_id, &mut arena);
             }
         }
 
@@ -159,8 +165,8 @@ impl NcbiFileTaxonomy {
             let fields = line.split("\t|\t").collect::<Vec<&str>>();
             if fields[3].starts_with("scientific name") {
                 let id_str = fields[0];
-                let id = id_str.parse::<i32>().or_else(|e| Err(NcbiTaxonomyError::ParseIntError(e)))?;
-                let name = if fields[2] != "" { fields[2].to_string() } else { fields[1].to_string() };
+                let id = id_str.parse::<i32>().map_err(NcbiTaxonomyError::ParseIntError)?;
+                let name = if !fields[2].is_empty() { fields[2].to_string() } else { fields[1].to_string() };
                 let node_id = id_to_node.get(&id).expect("ID not found in id_to_node");
                 id_to_name.insert(id, name.clone());
                 name_to_node.insert(name, *node_id);
@@ -175,12 +181,11 @@ impl NcbiFileTaxonomy {
         // design of storing a tree in a relational DB inspired by:
         // https://makandracards.com/makandra/45275-storing-trees-in-databases
         use schema::taxonomy;
-        let connection = establish_connection(db_url);
+        let mut connection = establish_connection(db_url);
 
-        embed_migrations!();
-        embedded_migrations::run(&connection)?;
+        connection.run_pending_migrations(MIGRATIONS)?;
 
-        connection.transaction::<_, ToSqliteError, _>(|| {
+        connection.transaction::<_, ToSqliteError, _>(|connection| {
             for (id, nodeid) in self.id_to_node.iter() {
                 let mut ancestors_vec = nodeid.ancestors(&self.arena).map(|nodeid| self.get_id_by_node(nodeid).unwrap().to_string()).collect::<Vec<String>>();
                 ancestors_vec.reverse();
@@ -205,7 +210,7 @@ impl NcbiFileTaxonomy {
                 };
                 diesel::insert_into(taxonomy::table)
                     .values(&taxon_record   )
-                    .execute(&connection)?;
+                    .execute(connection)?;
             }
             Ok(())
         })?;
@@ -222,7 +227,7 @@ impl NcbiFileTaxonomy {
     /// traversal
     ///
     /// traverse the tree nodes (in depth first order) from the node with a given NCBI Taxonomy ID
-    pub fn traversal(&self, from: i32) -> Option<Traverse<i32>> {
+    pub fn traversal(&self, from: i32) -> Option<Traverse<'_, i32>> {
         match self.get_node_by_id(from) {
             Some(node_id) => Some(node_id.traverse(&self.arena)),
             None => None
@@ -233,10 +238,7 @@ impl NcbiFileTaxonomy {
     ///
     /// get the NCBI Taxonomy ID held by the node with a given NodeId
     pub fn get_id_by_node(&self, node_id: NodeId) -> Option<i32> {
-        match self.arena.get(node_id)  {
-            Some(node) => Some(node.data),
-            None => None
-        }
+        self.arena.get(node_id).map(|node| *node.get())
     }
 }
 
@@ -311,12 +313,8 @@ impl NcbiTaxonomy for NcbiFileTaxonomy {
     ///
     /// get the list of IDs of a taxon and its parents (up to the root)
     fn get_lineage(&self, name: &str) -> Option<Vec<i32>> {
-        let node_id = match self.name_to_node.get(name)  {
-            Some(val) => val,
-            None => return None
-        };
-
-        Some(node_id.ancestors(&self.arena).map(|node_id| *(&self.get_id_by_node(node_id).unwrap())).collect())
+        let node_id = self.name_to_node.get(name)?;
+        Some(node_id.ancestors(&self.arena).map(|node_id| self.get_id_by_node(node_id).unwrap()).collect())
     }
 
     /// get_distance_to_common_ancestor_id
@@ -382,28 +380,26 @@ impl NcbiTaxonomy for NcbiFileTaxonomy {
 
         let taxon2 = self.name_to_node.get(name2)?;
 
-        match self.get_distance_to_common_ancestor_taxid(self.get_id_by_node(*taxon1).unwrap(),
-                                                   self.get_id_by_node(*taxon2).unwrap(), only_canonical) {
-            Some((distance, taxid)) => Some((distance, self.get_name_by_id(taxid).unwrap())),
-            None => None
-        }
+        self.get_distance_to_common_ancestor_taxid(self.get_id_by_node(*taxon1).unwrap(),
+                                                   self.get_id_by_node(*taxon2).unwrap(), only_canonical).map(
+                                                    |(distance, taxid)| (distance, self.get_name_by_id(taxid).unwrap()))
     }
 }
 
 pub struct NcbiSqliteTaxonomy {
-    connection: SqliteConnection
+    connection: RefCell<SqliteConnection>
 }
 
 impl NcbiSqliteTaxonomy {
     pub fn new(db_url: Option<&str>) -> Self {
         NcbiSqliteTaxonomy {
-            connection: establish_connection(db_url)
+            connection: RefCell::new(establish_connection(db_url))
         }
     }
 
     pub fn from_connection(connection: SqliteConnection) -> Self {
         NcbiSqliteTaxonomy {
-            connection
+            connection: RefCell::new(connection)
         }
     }
 
@@ -412,7 +408,7 @@ impl NcbiSqliteTaxonomy {
 
         let results: Vec<Option<String>> = taxonomy.filter(id.eq(taxid))
             .select(ancestry)
-            .load(&self.connection)
+            .load(&mut *self.connection.borrow_mut())
             .expect("Error loading taxonomy");
 
         match results.len() {
@@ -438,7 +434,7 @@ impl NcbiSqliteTaxonomy {
 
         let results: Vec<Option<String>> = taxonomy.filter(id.eq(taxid))
             .select(rank)
-            .load(&self.connection)
+            .load(&mut *self.connection.borrow_mut())
             .expect("Error loading taxonomy");
 
         match results.len() {
@@ -455,7 +451,7 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
 
         let results: Vec<i64> = taxonomy.filter(id.eq(taxid))
             .select(count(id))
-            .load(&self.connection)
+            .load(&mut *self.connection.borrow_mut())
             .expect("Error loading taxonomy");
 
         results[0] == 1
@@ -466,7 +462,7 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
 
         let results: Vec<i64> = taxonomy.filter(name.eq(name_str))
             .select(count(id))
-            .load(&self.connection)
+            .load(&mut *self.connection.borrow_mut())
             .expect("Error loading taxonomy");
 
         results[0] == 1
@@ -503,13 +499,10 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
                         .or(ancestry.like(pattern3))
                 ))
             .select(count(id))
-            .load(&self.connection)
+            .load(&mut *self.connection.borrow_mut())
             .expect("Error loading taxonomy");
 
-        match results.len() {
-            1 => true,
-            _ => false
-        }
+        matches!(results.len(), 1)
     }
 
     fn get_name_by_id(&self, taxid: i32) -> Option<String> {
@@ -517,7 +510,7 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
 
         let results: Vec<String> = taxonomy.filter(id.eq(taxid))
             .select(name)
-            .load(&self.connection)
+            .load(&mut *self.connection.borrow_mut())
             .expect("Error loading taxonomy");
 
         match results.len() {
@@ -531,7 +524,7 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
 
         let results: Vec<i32> = taxonomy.filter(name.eq(name_str))
             .select(id)
-            .load(&self.connection)
+            .load(&mut *self.connection.borrow_mut())
             .expect("Error loading taxonomy");
 
         match results.len() {
@@ -541,10 +534,7 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
     }
 
     fn get_lineage(&self, name: &str) -> Option<Vec<i32>> {
-        let tax_id = match self.get_id_by_name(name)  {
-            Some(val) => val,
-            None => return None
-        };
+        let tax_id = self.get_id_by_name(name)?;
         Some(self.get_ancestors(tax_id))
     }
 
@@ -589,20 +579,12 @@ impl NcbiTaxonomy for NcbiSqliteTaxonomy {
     }
 
     fn get_distance_to_common_ancestor(&self, name1: &str, name2: &str, only_canonical: bool) -> Option<(i32, String)> {
-        let taxid1 = match self.get_id_by_name(name1) {
-            Some(val) => val,
-            None => return None
-        };
+        let taxid1 = self.get_id_by_name(name1)?;
+        let taxid2 = self.get_id_by_name(name2)?;
 
-        let taxid2 = match self.get_id_by_name(name2) {
-            Some(val) => val,
-            None => return None
-        };
-
-        match self.get_distance_to_common_ancestor_taxid(taxid1, taxid2, only_canonical) {
-            Some((distance, taxid)) => Some((distance, self.get_name_by_id(taxid).unwrap())),
-            None => None
-        }
+        self.get_distance_to_common_ancestor_taxid(taxid1, taxid2, only_canonical).map(
+            |(distance, taxid)| (distance, self.get_name_by_id(taxid).unwrap())
+        )
     }
 }
 

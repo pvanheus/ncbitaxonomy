@@ -9,7 +9,7 @@ pub struct Taxon {
 }
 
 #[derive(Insertable)]
-#[table_name="taxonomy"]
+#[diesel(table_name = taxonomy)]
 pub struct NewTaxon<'a> {
     pub id: &'a i32,
     pub ancestry: Option<&'a str>,
