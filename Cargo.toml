@@ -13,7 +13,7 @@ default-run = "taxonomy_util"
 edition = "2024"
 
 [badges]
-circle-ci = { repository = "pvanheus/ncbitaxonomy", branch = "master" }
+github-actions = { repository = "pvanheus/ncbitaxonomy", workflow = "CI" }
 
 [dependencies]
 thiserror = "~2"

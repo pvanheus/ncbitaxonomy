@@ -1,4 +1,4 @@
-[![CircleCI](https://circleci.com/gh/pvanheus/ncbitaxonomy.svg?style=svg)](https://circleci.com/gh/pvanheus/ncbitaxonomy)
+[![CI](https://github.com/pvanheus/ncbitaxonomy/actions/workflows/ci.yml/badge.svg)](https://github.com/pvanheus/ncbitaxonomy/actions/workflows/ci.yml)
 
 ### ncbitaxonomy
 
